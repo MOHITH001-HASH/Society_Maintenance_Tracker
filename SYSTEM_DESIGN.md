@@ -1,25 +1,26 @@
 # System Design Document: Society Maintenance Tracker
 
 ## 1. Introduction
-The **Society Maintenance Tracker** is a web-based platform built to handle apartment maintenance complaints, track their resolution status, manage society notices, and send email updates. This document describes the design of the core modules: the complaint history model, overdue detection, photo handling, and the notification flow.
+The **Society Maintenance Tracker** is a web application designed to manage residential maintenance operations, track issue resolution lifecycles, publish community notices, and deliver automated notifications. This document outlines the technical design of the core modules: complaint status lifecycle modeling, overdue issue detection, photo upload processing, and the notification pipeline.
 
 ---
 
-## 2. Complaint Status Lifecycle & History Model
+## 2. Complaint Status Lifecycle and Audit History Model
 
-Every maintenance complaint follows a defined state transition lifecycle:
+### 2.1 State Transition Model
+Every maintenance issue follows a sequential state progression:
 
 ```
-[Open] ─────────► [In Progress] ─────────► [Resolved (Closed)]
+[Open] ─────────► [In Progress] ─────────► [Resolved]
 ```
 
-### Data Model Design
-To ensure transparency and traceability, status updates are never overwritten blindly. Instead, every state change appends an entry to an immutable `statusHistory` array within the complaint record:
+### 2.2 Schema and Data Representation
+Status changes are tracked through an append-only `statusHistory` array within the complaint document to ensure auditability:
 
 ```json
 {
   "id": "TICKET-101",
-  "title": "Water leakage in kitchen",
+  "title": "Main water line leakage in kitchen",
   "category": "Plumbing",
   "priority": "High",
   "status": "In Progress",
@@ -38,85 +39,78 @@ To ensure transparency and traceability, status updates are never overwritten bl
       "toStatus": "In Progress",
       "changedBy": "Admin Sharma",
       "changedByRole": "admin",
-      "note": "Plumber assigned, visiting today at 4 PM",
+      "note": "Plumber assigned, site inspection scheduled",
       "timestamp": "2026-08-21T11:30:00Z"
     }
   ]
 }
 ```
 
-### Why this design?
-1. **Full Audit Trail**: Both residents and admins can see the complete timeline of who worked on the issue, when the change happened, and what remarks were left.
-2. **Deterministic State Machine**: When an admin selects `Resolved`, the system records the timestamp and closes the ticket, preventing accidental duplicate edits.
+### 2.3 Design Considerations
+1. **Traceability**: Residents and administrators can review the chronological sequence of actions, timestamps, and notes.
+2. **Deterministic State Management**: Transitioning an issue to `Resolved` records the resolution timestamp and closes the active workflow.
 
 ---
 
-## 3. Overdue Detection & Priority Handling
+## 3. Overdue Detection and Priority Management
 
-Complaints must not remain unaddressed indefinitely. The system implements a configurable overdue detection mechanism.
+The platform incorporates an automated overdue calculation mechanism to highlight unresolved tickets.
 
-### Algorithm & Mechanism
-1. **Configurable Threshold ($T$)**: The admin sets an overdue threshold in days (e.g., $T = 3$ days).
-2. **Dynamic Check**: When the dashboard loads or a scheduled background worker runs:
-   $$\text{Age in Days} = \frac{\text{Current Time} - \text{Created Timestamp}}{86,400\text{ seconds}}$$
+### 3.1 Algorithm
+1. **Configurable Threshold ($T$)**: The administrator specifies an overdue threshold in days ($T$).
+2. **Calculation**:
+   $$\text{Age in Days} = \frac{\text{Current Timestamp} - \text{Created Timestamp}}{86,400\text{ seconds}}$$
 3. **Overdue Condition**:
    $$\text{isOverdue} = (\text{Status} \neq \text{Resolved}) \land (\text{Age in Days} > T)$$
-4. **Queue Prioritization**:
-   The admin complaint table sorts records using multi-level sorting:
-   - **First Priority**: Overdue items ($\text{isOverdue} = \text{true}$) at the very top with red alert tags.
-   - **Second Priority**: Priority weight ($\text{Urgent} > \text{High} > \text{Normal} > \text{Low}$).
-   - **Third Priority**: Creation timestamp (Newest first).
-
-This ensures admins immediately notice urgent or neglected issues without manual searching.
+4. **Queue Ordering**:
+   The administration view applies multi-tier sorting:
+   - Tier 1: Overdue tickets ($\text{isOverdue} = \text{true}$) are hoisted to the top.
+   - Tier 2: Priority weight ($\text{Urgent} > \text{High} > \text{Normal} > \text{Low}$).
+   - Tier 3: Creation timestamp (Descending).
 
 ---
 
 ## 4. Photo Upload Handling
 
-Photos provide vital visual context for maintenance workers (e.g., pipe cracks, electrical sparks).
+Photo attachments provide visual verification for reported maintenance issues.
 
 ```
-[Resident Browser] ──(1. Select Image)──► [Client Validation (Size < 5MB, Format)]
-         │
-         ├──(2. Compression / Encoding)──► [Base64 Data URI or Storage Bucket]
-         │
-         └──(3. Embed in Ticket Payload)─► [Database Storage & Fast Rendering]
+[Client Interface] ──(Validation: Format & Size < 5MB)──► [Encoding / Storage Pipeline]
+                                                                   │
+                                                                   ▼
+[UI Modal & Thumbnail Rendering] ◄──────────────────── [Persisted Asset Reference]
 ```
 
-### Handling Process:
-1. **Client-Side Validation**: The file input checks that the uploaded file is an image (`image/jpeg`, `image/png`, `image/webp`) and does not exceed 5 MB.
-2. **Encoding & Storage**: The image is processed and stored either via cloud storage URLs or optimized Base64 image strings.
-3. **Display**: Thumbnails appear in complaint cards. Clicking the thumbnail opens a high-resolution preview modal with zoom support.
+### 4.1 Implementation Pipeline
+1. **Client-Side Validation**: Checks file MIME type (`image/jpeg`, `image/png`, `image/webp`) and enforces a 5 MB maximum size limit.
+2. **Processing & Persistence**: Validated images are compressed and stored as Base64 data strings or managed object storage references.
+3. **Rendering**: Thumbnails are displayed in complaint cards, expanding into full-resolution views when inspected.
 
 ---
 
-## 5. Notification & Email Flow
+## 5. Notification Architecture
 
-Automated alerts keep residents informed without requiring them to repeatedly check the portal.
+Automated notifications inform users of state changes without requiring continuous manual polling.
 
 ```
-[Admin Action] (Status Update / Post Important Notice)
-       │
-       ▼
-[Event Trigger]
-       │
-       ├──► 1. Save change to Database
-       │
-       └──► 2. Push Notification Payload to Mail Queue
-                   │
-                   ▼
-       [Email Service / Worker] (Trigger Email / SMTP)
-                   │
-                   ▼
-       [Resident Email Inbox] (HTML Notification with Ticket ID & Link)
+[Administrative Event: Status Transition / Announcement]
+                         │
+                         ▼
+        [Database Update & Event Emission]
+                         │
+                         ▼
+           [Notification Dispatch Engine]
+                         │
+                         ▼
+         [User Email Delivery / Audit Log]
 ```
 
-### Triggers:
-1. **Complaint Status Change**: When an admin moves a complaint from `Open` to `In Progress` or `Resolved`, an email is triggered to the resident's registered email with the new status, timestamp, and admin note.
-2. **Important Society Notice**: When a notice is published with `isImportant = true`, an email announcement is broadcast to all active residents in that apartment complex.
+### 5.1 Event Triggers
+1. **Status Modification**: Moving a ticket between states emits a payload containing the ticket ID, new status, timestamp, and optional administrative notes to the resident's registered email.
+2. **High-Priority Notice**: Announcements marked with `isImportant = true` trigger broadcast notifications to all registered residents within the society.
 
 ---
 
-## 6. Summary
+## 6. Conclusion
 
-This design guarantees a clean separation between presentation, business rules, and data persistence. It delivers a fast, transparent, and dependable maintenance tracking workflow for residents and society administrators.
+This architecture establishes a clear separation of concerns across presentation, domain workflows, and data storage, ensuring predictable maintenance tracking for residential communities.
