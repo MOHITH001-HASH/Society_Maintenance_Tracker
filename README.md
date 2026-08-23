@@ -148,7 +148,6 @@ OTP_SECRET_KEY=society-otp-auth-token-secret-key
 
 # Application URLs
 APP_URL=http://localhost:3000
-VITE_APP_URL=https://ais-pre-azbspzz6h73vpblohxq4ew-567613665429.asia-southeast1.run.app
 ```
 
 ---
@@ -216,4 +215,4 @@ VITE_APP_URL=https://ais-pre-azbspzz6h73vpblohxq4ew-567613665429.asia-southeast1
 
 ## 9. Live Application URL
 
-- **Deployment URL**: https://ais-pre-azbspzz6h73vpblohxq4ew-567613665429.asia-southeast1.run.app
+- **Deployment URL**: https://society-maintenance-tracker-pied.vercel.app
