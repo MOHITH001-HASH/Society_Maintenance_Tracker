@@ -698,16 +698,6 @@ export default function Login() {
           <p className="text-xs text-slate-500 mt-1 font-medium">
             Multi-Tenant Resident & Society Management System
           </p>
-          <div className="mt-3">
-            <button
-              type="button"
-              onClick={() => navigate("/report")}
-              className="inline-flex items-center space-x-1.5 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 text-xs font-bold rounded-lg transition shadow-2xs cursor-pointer"
-            >
-              <Sparkles className="w-3.5 h-3.5 text-blue-600" />
-              <span>📄 View & Download Full Project Report (PDF)</span>
-            </button>
-          </div>
         </div>
         
         {error && (
