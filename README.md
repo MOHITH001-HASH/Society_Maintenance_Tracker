@@ -130,24 +130,25 @@ Open a web browser and navigate to `http://localhost:3000`.
 
 ## 6. Environment Configuration
 
-Create a `.env` file in the project root based on the following template:
+Create a `.env` file in the project root with the following configuration:
 
 ```env
 # Frontend / Firebase Client Credentials
-VITE_FIREBASE_API_KEY=your_firebase_api_key
-VITE_FIREBASE_AUTH_DOMAIN=your_project.firebaseapp.com
-VITE_FIREBASE_PROJECT_ID=your_firebase_project_id
-VITE_FIREBASE_STORAGE_BUCKET=your_project.appspot.com
-VITE_FIREBASE_MESSAGING_SENDER_ID=your_sender_id
-VITE_FIREBASE_APP_ID=your_app_id
+VITE_FIREBASE_API_KEY=AIzaSyBxjMAVZDvLqiejAAotRhtdkt4HZ92F60c
+VITE_FIREBASE_AUTH_DOMAIN=gen-lang-client-0615302941.firebaseapp.com
+VITE_FIREBASE_PROJECT_ID=gen-lang-client-0615302941
+VITE_FIREBASE_STORAGE_BUCKET=gen-lang-client-0615302941.firebasestorage.app
+VITE_FIREBASE_MESSAGING_SENDER_ID=859777274196
+VITE_FIREBASE_APP_ID=1:859777274196:web:7afbc612822800120af8c1
 
 # Backend Credentials
-DJANGO_SECRET_KEY=your_django_secret_key
-GATE_PASS_SECRET=your_hmac_secret
-OTP_SECRET_KEY=your_otp_secret_key
+DJANGO_SECRET_KEY=django-insecure-society-tracker-secret-key-2026
+GATE_PASS_SECRET=society-gate-pass-hmac-verification-key
+OTP_SECRET_KEY=society-otp-auth-token-secret-key
 
-# Hosted Base URL
+# Application URLs
 APP_URL=http://localhost:3000
+VITE_APP_URL=https://ais-pre-azbspzz6h73vpblohxq4ew-567613665429.asia-southeast1.run.app
 ```
 
 ---
