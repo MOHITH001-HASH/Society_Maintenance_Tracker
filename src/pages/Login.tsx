@@ -312,7 +312,7 @@ export default function Login() {
             <Building2 className="w-6 h-6 text-white" />
           </div>
           <h2 className="text-2xl font-black text-slate-900 tracking-tight">
-            Society Portal
+            Vasturith
           </h2>
           <p className="text-xs text-slate-500 mt-1 font-medium">
             Multi-Tenant Resident & Society Management System

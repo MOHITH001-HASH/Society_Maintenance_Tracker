@@ -752,6 +752,19 @@ export default function AdminDashboard() {
       {/* Sidebar */}
       <aside className="w-72 bg-slate-900 text-white hidden md:flex flex-col shrink-0 border-r border-slate-800">
         
+        {/* Brand Banner */}
+        <div className="px-5 py-4 border-b border-slate-800/80 flex items-center justify-between">
+          <div className="flex items-center space-x-2.5">
+            <div className="w-8 h-8 bg-blue-600 rounded-xl flex items-center justify-center shadow-md shadow-blue-500/20">
+              <Building2 className="w-4 h-4 text-white" />
+            </div>
+            <div>
+              <h1 className="text-sm font-black tracking-tight text-white">Vasturith</h1>
+              <p className="text-[10px] text-blue-400 font-semibold uppercase tracking-wider">Admin Suite</p>
+            </div>
+          </div>
+        </div>
+
         {/* Society Switcher Header in Sidebar */}
         <div className="p-4 border-b border-slate-800">
           <div className="flex items-center justify-between mb-2">
