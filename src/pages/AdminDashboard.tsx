@@ -1,11 +1,10 @@
 import { useState, useEffect, FormEvent, ChangeEvent } from "react";
 import { collection, query, onSnapshot, doc, updateDoc, addDoc, orderBy, getDoc, setDoc, limit, where, getDocs, deleteDoc } from "firebase/firestore";
-import { LogOut, AlertCircle, CheckCircle2, Clock, Filter, Plus, Megaphone, Settings as SettingsIcon, Camera, Mail, User as UserIcon, Building2, ChevronDown, Sparkles, ZoomIn, Trash2, Image as ImageIcon, ShieldAlert, Hourglass, Check, X, ShieldCheck, History, Download, Search, FileText, Activity, Flame } from "lucide-react";
+import { LogOut, AlertCircle, CheckCircle2, Clock, Filter, Plus, Megaphone, Settings as SettingsIcon, Camera, Mail, User as UserIcon, Building2, ChevronDown, Sparkles, ZoomIn, Trash2, Image as ImageIcon, ShieldAlert, Hourglass, Check, X, ShieldCheck, History, Download, Search, FileText, Activity, Flame, Lock, Key, Home, DoorClosed, Users } from "lucide-react";
 import { auth, db } from "../lib/firebase";
 import { useAuth } from "../contexts/AuthContext";
-import { User, Complaint, Notice, SocietySettings, HouseholdRequest, AuditLog, Staff, Society } from "../types";
+import { User, Complaint, Notice, SocietySettings, HouseholdRequest, AuditLog, Staff, Society, UnitOccupancyStatus } from "../types";
 import { format, isToday, isThisWeek, isThisMonth } from "date-fns";
-import { Users } from "lucide-react";
 import { sendNotification } from "../lib/notify";
 import { uploadMedia } from "../lib/mediaUpload";
 import { checkIsOverdue, getOpenForText, getSlaStatus, getSlaDescription } from "../lib/complaintUtils";
@@ -17,7 +16,10 @@ import ComplaintHistoryModal from "../components/ComplaintHistoryModal";
 export default function AdminDashboard() {
   const { user, userProfile, signOut } = useAuth();
   const [activeTab, setActiveTab] = useState<"complaints" | "notices" | "directory" | "logs" | "settings" | "profile">("complaints");
-  const [directorySubTab, setDirectorySubTab] = useState<"residents" | "approvals" | "staff">("residents");
+  const [directorySubTab, setDirectorySubTab] = useState<"units" | "residents" | "approvals" | "staff">("units");
+  const [unitStatusFilter, setUnitStatusFilter] = useState<"all" | "occupied" | "unoccupied" | "rented">("all");
+  const [unitSearchQuery, setUnitSearchQuery] = useState("");
+  const [unitFloorFilter, setUnitFloorFilter] = useState("all");
   
   // Multi-Tenant Societies State
   const [societies, setSocieties] = useState<Society[]>([]);
@@ -103,6 +105,73 @@ export default function AdminDashboard() {
     residentType: "primary" as "primary" | "household",
   });
 
+  // Helper to determine unit occupancy status
+  const getUnitStatus = (unit: string): UnitOccupancyStatus => {
+    if (currentSociety?.unitStatuses && currentSociety.unitStatuses[unit]) {
+      return currentSociety.unitStatuses[unit];
+    }
+    const hasApprovedResident = usersList.some(
+      (u) => u.unitNumber === unit && u.status === "approved" && u.role === "resident"
+    );
+    return hasApprovedResident ? "occupied" : "unoccupied";
+  };
+
+  const getUnitResidents = (unit: string) => {
+    return usersList.filter(
+      (u) => u.unitNumber === unit && u.status === "approved" && u.role === "resident"
+    );
+  };
+
+  const getUnitPrimaryResident = (unit: string) => {
+    return usersList.find(
+      (u) => u.unitNumber === unit && u.residentType === "primary" && u.status === "approved" && u.role === "resident"
+    );
+  };
+
+  const getUnitHouseholdMembers = (unit: string) => {
+    return usersList.filter(
+      (u) => u.unitNumber === unit && u.residentType === "household" && u.status === "approved" && u.role === "resident"
+    );
+  };
+
+  const handleUpdateUnitStatus = async (unit: string, newStatus: UnitOccupancyStatus) => {
+    if (!selectedSocietyId) return;
+    try {
+      await updateDoc(doc(db, "societies", selectedSocietyId), {
+        [`unitStatuses.${unit}`]: newStatus,
+        updatedAt: new Date().toISOString()
+      });
+
+      // Write audit log entry
+      await addDoc(collection(db, "auditLogs"), {
+        societyId: selectedSocietyId,
+        action: "Unit Occupancy Status Updated",
+        category: "unit_management",
+        description: `Admin updated Unit ${unit} status to ${newStatus.toUpperCase()}${newStatus === 'unoccupied' ? ' (Logins & self-registrations locked)' : ''}.`,
+        actorId: userProfile?.id || user?.uid || "",
+        actorName: userProfile?.name || "Admin",
+        actorRole: "admin",
+        unitNumber: unit,
+        timestamp: new Date().toISOString()
+      });
+    } catch (err: any) {
+      console.error("Error updating unit status:", err);
+      alert("Failed to update unit status: " + err.message);
+    }
+  };
+
+  const handleQuickInviteToUnit = (unit: string) => {
+    setNewResident({
+      name: "",
+      email: "",
+      phone: "",
+      unitNumber: unit,
+      residentType: "primary"
+    });
+    setShowAddResident(true);
+    setDirectorySubTab("residents");
+  };
+
   const handleAddResident = async (e: FormEvent) => {
     e.preventDefault();
     if (!newResident.name || !newResident.email || !newResident.unitNumber || !selectedSocietyId) {
@@ -136,12 +205,22 @@ export default function AdminDashboard() {
         createdAt: new Date().toISOString()
       });
 
+      // Update unit status on society document to occupied
+      try {
+        await updateDoc(doc(db, "societies", selectedSocietyId), {
+          [`unitStatuses.${newResident.unitNumber.trim()}`]: "occupied",
+          updatedAt: new Date().toISOString()
+        });
+      } catch (e) {
+        console.warn("Auto-update unitStatus warning:", e);
+      }
+
       // Audit Log
       await addDoc(collection(db, "auditLogs"), {
         societyId: selectedSocietyId,
         action: "Resident Added by Administrator",
         category: "membership",
-        description: `Admin added resident ${newResident.name} (${emailLower}) for Unit ${newResident.unitNumber} (${newResident.residentType === 'household' ? 'Household Member' : 'Primary Resident'}).`,
+        description: `Admin added resident ${newResident.name} (${emailLower}) for Unit ${newResident.unitNumber} (${newResident.residentType === 'household' ? 'Household Member' : 'Primary Resident'}). Unit set to Occupied.`,
         actorId: userProfile?.id || user?.uid || "",
         actorName: userProfile?.name || "Admin",
         actorRole: "admin",
@@ -1390,28 +1469,400 @@ export default function AdminDashboard() {
           ) : activeTab === "directory" ? (
             <div className="space-y-6">
               {/* Directory Sub-tabs */}
-              <div className="flex border-b border-slate-200 gap-4">
+              <div className="flex border-b border-slate-200 gap-4 overflow-x-auto">
+                <button
+                  onClick={() => setDirectorySubTab("units")}
+                  className={`pb-2.5 text-xs font-bold transition-all border-b-2 whitespace-nowrap flex items-center cursor-pointer ${directorySubTab === "units" ? "border-blue-600 text-blue-600" : "border-transparent text-slate-500 hover:text-slate-800"}`}
+                >
+                  <Building2 className="w-3.5 h-3.5 mr-1.5" />
+                  Units Directory ({currentSociety?.generatedUnits?.length || 0})
+                </button>
                 <button
                   onClick={() => setDirectorySubTab("residents")}
-                  className={`pb-2.5 text-xs font-bold transition-all border-b-2 ${directorySubTab === "residents" ? "border-blue-600 text-blue-600" : "border-transparent text-slate-500 hover:text-slate-800"}`}
+                  className={`pb-2.5 text-xs font-bold transition-all border-b-2 whitespace-nowrap flex items-center cursor-pointer ${directorySubTab === "residents" ? "border-blue-600 text-blue-600" : "border-transparent text-slate-500 hover:text-slate-800"}`}
                 >
+                  <Users className="w-3.5 h-3.5 mr-1.5" />
                   Residents ({usersList.filter(u => u.role === 'resident' && u.status === 'approved').length})
                 </button>
                 <button
                   onClick={() => setDirectorySubTab("approvals")}
-                  className={`pb-2.5 text-xs font-bold transition-all border-b-2 relative ${directorySubTab === "approvals" ? "border-blue-600 text-blue-600" : "border-transparent text-slate-500 hover:text-slate-800"}`}
+                  className={`pb-2.5 text-xs font-bold transition-all border-b-2 relative whitespace-nowrap flex items-center cursor-pointer ${directorySubTab === "approvals" ? "border-blue-600 text-blue-600" : "border-transparent text-slate-500 hover:text-slate-800"}`}
                 >
+                  <ShieldCheck className="w-3.5 h-3.5 mr-1.5" />
                   Pending Approvals ({usersList.filter(u => (u.status === 'pending' || u.status === 'invited') && u.role === 'resident').length + householdRequests.filter(r => r.status === 'pending' && r.type === 'removal').length})
                 </button>
                 <button
                   onClick={() => setDirectorySubTab("staff")}
-                  className={`pb-2.5 text-xs font-bold transition-all border-b-2 ${directorySubTab === "staff" ? "border-blue-600 text-blue-600" : "border-transparent text-slate-500 hover:text-slate-800"}`}
+                  className={`pb-2.5 text-xs font-bold transition-all border-b-2 whitespace-nowrap flex items-center cursor-pointer ${directorySubTab === "staff" ? "border-blue-600 text-blue-600" : "border-transparent text-slate-500 hover:text-slate-800"}`}
                 >
+                  <ShieldAlert className="w-3.5 h-3.5 mr-1.5" />
                   Maintenance Staff ({staffList.length})
                 </button>
               </div>
 
-              {directorySubTab === "residents" ? (
+              {directorySubTab === "units" ? (
+                <div className="space-y-6 animate-in fade-in">
+                  {/* Occupancy Statistics Metric Cards */}
+                  {(() => {
+                    const allUnits = currentSociety?.generatedUnits || [];
+                    const occupiedCount = allUnits.filter(u => getUnitStatus(u) === "occupied").length;
+                    const unoccupiedCount = allUnits.filter(u => getUnitStatus(u) === "unoccupied").length;
+                    const rentedCount = allUnits.filter(u => getUnitStatus(u) === "rented").length;
+                    const occupiedPercent = allUnits.length > 0 ? Math.round(((occupiedCount + rentedCount) / allUnits.length) * 100) : 0;
+
+                    return (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-slate-500 uppercase">Total Units</span>
+                            <div className="p-2 bg-blue-50 text-blue-600 rounded-lg">
+                              <Building2 className="w-4 h-4" />
+                            </div>
+                          </div>
+                          <div className="mt-2 flex items-baseline justify-between">
+                            <span className="text-2xl font-black text-slate-900">{allUnits.length}</span>
+                            <span className="text-xs text-slate-500 font-semibold">{currentSociety?.numberOfFloors || 1} Floors</span>
+                          </div>
+                          <p className="text-[11px] text-slate-400 mt-1">Configured apartment inventory</p>
+                        </div>
+
+                        <div className="bg-white p-4 rounded-xl border border-emerald-100 shadow-2xs">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-emerald-700 uppercase">Occupied Units</span>
+                            <div className="p-2 bg-emerald-50 text-emerald-600 rounded-lg">
+                              <CheckCircle2 className="w-4 h-4" />
+                            </div>
+                          </div>
+                          <div className="mt-2 flex items-baseline justify-between">
+                            <span className="text-2xl font-black text-emerald-600">{occupiedCount}</span>
+                            <span className="text-xs bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-bold">
+                              {occupiedPercent}% Active
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-slate-500 mt-1">Owner-occupied units with verified residents</p>
+                        </div>
+
+                        <div className="bg-white p-4 rounded-xl border border-amber-200 shadow-2xs">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-amber-700 uppercase">Unoccupied / Vacant</span>
+                            <div className="p-2 bg-amber-50 text-amber-600 rounded-lg">
+                              <Lock className="w-4 h-4" />
+                            </div>
+                          </div>
+                          <div className="mt-2 flex items-baseline justify-between">
+                            <span className="text-2xl font-black text-amber-600">{unoccupiedCount}</span>
+                            <span className="text-[10px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded font-bold flex items-center">
+                              <Lock className="w-2.5 h-2.5 mr-1" /> Logins Locked
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-amber-700 mt-1">Self-registration blocked to prevent unauthorized access</p>
+                        </div>
+
+                        <div className="bg-white p-4 rounded-xl border border-indigo-100 shadow-2xs">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-indigo-700 uppercase">Rented / Tenants</span>
+                            <div className="p-2 bg-indigo-50 text-indigo-600 rounded-lg">
+                              <Key className="w-4 h-4" />
+                            </div>
+                          </div>
+                          <div className="mt-2 flex items-baseline justify-between">
+                            <span className="text-2xl font-black text-indigo-600">{rentedCount}</span>
+                            <span className="text-xs text-indigo-500 font-semibold">Leased</span>
+                          </div>
+                          <p className="text-[11px] text-slate-500 mt-1">Units occupied by registered tenants</p>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* Filter and Search Bar */}
+                  <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs space-y-3">
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                      {/* Status Filter Tabs */}
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="text-xs font-bold text-slate-500 uppercase mr-1">Status:</span>
+                        {(["all", "occupied", "unoccupied", "rented"] as const).map((st) => {
+                          const allUnits = currentSociety?.generatedUnits || [];
+                          const count =
+                            st === "all"
+                              ? allUnits.length
+                              : allUnits.filter(u => getUnitStatus(u) === st).length;
+                          return (
+                            <button
+                              key={st}
+                              onClick={() => setUnitStatusFilter(st)}
+                              className={`px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer flex items-center ${
+                                unitStatusFilter === st
+                                  ? "bg-slate-900 text-white shadow-xs"
+                                  : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                              }`}
+                            >
+                              {st === "all" && "All Units"}
+                              {st === "occupied" && "Occupied"}
+                              {st === "unoccupied" && "Unoccupied (Vacant)"}
+                              {st === "rented" && "Rented"}
+                              <span className={`ml-1.5 text-[10px] px-1.5 py-0.2 rounded-full ${
+                                unitStatusFilter === st ? "bg-white/20 text-white" : "bg-slate-200 text-slate-700"
+                              }`}>
+                                {count}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {/* Add Resident CTA */}
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => {
+                            setNewResident({ name: "", email: "", phone: "", unitNumber: "", residentType: "primary" });
+                            setShowAddResident(true);
+                            setDirectorySubTab("residents");
+                          }}
+                          className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg shadow-2xs flex items-center transition cursor-pointer"
+                        >
+                          <Plus className="w-3.5 h-3.5 mr-1" /> Add / Invite Resident
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-slate-100">
+                      {/* Search */}
+                      <div className="sm:col-span-2 relative">
+                        <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                        <input
+                          type="text"
+                          placeholder="Search by unit number (e.g. 101), resident name, or email..."
+                          value={unitSearchQuery}
+                          onChange={(e) => setUnitSearchQuery(e.target.value)}
+                          className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:ring-2 focus:ring-blue-500 focus:outline-hidden"
+                        />
+                        {unitSearchQuery && (
+                          <button
+                            onClick={() => setUnitSearchQuery("")}
+                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs"
+                          >
+                            ×
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Floor Filter */}
+                      <div>
+                        <select
+                          value={unitFloorFilter}
+                          onChange={(e) => setUnitFloorFilter(e.target.value)}
+                          className="w-full px-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:ring-2 focus:ring-blue-500 focus:outline-hidden cursor-pointer"
+                        >
+                          <option value="all">All Floors ({currentSociety?.numberOfFloors || 1} Total)</option>
+                          {Array.from({ length: currentSociety?.numberOfFloors || 1 }, (_, i) => i + 1).map((fl) => (
+                            <option key={fl} value={String(fl)}>
+                              Floor {fl}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Filtered Units Grid */}
+                  {(() => {
+                    const allUnits = currentSociety?.generatedUnits || [];
+                    const filteredUnits = allUnits.filter((u) => {
+                      const uStatus = getUnitStatus(u);
+                      
+                      // Status filter
+                      if (unitStatusFilter !== "all" && uStatus !== unitStatusFilter) {
+                        return false;
+                      }
+
+                      // Floor filter
+                      if (unitFloorFilter !== "all") {
+                        const parsedFloor = Math.floor(parseInt(u) / 100) || 1;
+                        if (String(parsedFloor) !== unitFloorFilter) {
+                          return false;
+                        }
+                      }
+
+                      // Search query
+                      if (unitSearchQuery.trim()) {
+                        const q = unitSearchQuery.trim().toLowerCase();
+                        const matchUnit = u.toLowerCase().includes(q);
+                        const residents = getUnitResidents(u);
+                        const matchResident = residents.some(
+                          (r) => r.name.toLowerCase().includes(q) || r.email.toLowerCase().includes(q) || (r.phone && r.phone.includes(q))
+                        );
+                        return matchUnit || matchResident;
+                      }
+
+                      return true;
+                    });
+
+                    if (filteredUnits.length === 0) {
+                      return (
+                        <div className="bg-white p-12 text-center rounded-xl border border-dashed border-slate-300">
+                          <Building2 className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                          <p className="text-xs font-bold text-slate-700">No units matched your filter criteria.</p>
+                          <p className="text-[11px] text-slate-400 mt-1">Try resetting the status or floor filters, or clearing the search query.</p>
+                          <button
+                            onClick={() => {
+                              setUnitStatusFilter("all");
+                              setUnitFloorFilter("all");
+                              setUnitSearchQuery("");
+                            }}
+                            className="mt-3 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-bold transition cursor-pointer"
+                          >
+                            Reset Filters
+                          </button>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {filteredUnits.map((u) => {
+                          const uStatus = getUnitStatus(u);
+                          const primary = getUnitPrimaryResident(u);
+                          const households = getUnitHouseholdMembers(u);
+                          const floor = Math.floor(parseInt(u) / 100) || 1;
+
+                          return (
+                            <div
+                              key={u}
+                              className={`bg-white rounded-xl border transition-all shadow-2xs hover:shadow-md flex flex-col justify-between ${
+                                uStatus === "unoccupied"
+                                  ? "border-amber-200 bg-linear-to-b from-amber-50/20 to-white"
+                                  : uStatus === "rented"
+                                  ? "border-indigo-100"
+                                  : "border-slate-200"
+                              }`}
+                            >
+                              {/* Card Header */}
+                              <div className="p-4 border-b border-slate-100">
+                                <div className="flex items-start justify-between">
+                                  <div>
+                                    <div className="flex items-center space-x-2">
+                                      <span className="text-lg font-black text-slate-900 tracking-tight">
+                                        Unit {u}
+                                      </span>
+                                      <span className="text-[10px] font-bold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">
+                                        Floor {floor}
+                                      </span>
+                                    </div>
+                                    <p className="text-[11px] text-slate-400 mt-0.5">
+                                      {currentSociety?.name}
+                                    </p>
+                                  </div>
+
+                                  {/* Status Pill */}
+                                  <div>
+                                    {uStatus === "occupied" && (
+                                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                        <CheckCircle2 className="w-3 h-3 mr-1 text-emerald-600" /> Occupied
+                                      </span>
+                                    )}
+                                    {uStatus === "unoccupied" && (
+                                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-50 text-amber-800 border border-amber-300">
+                                        <Lock className="w-3 h-3 mr-1 text-amber-600" /> Unoccupied (Locked)
+                                      </span>
+                                    )}
+                                    {uStatus === "rented" && (
+                                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                        <Key className="w-3 h-3 mr-1 text-indigo-600" /> Rented (Tenant)
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Card Body: Resident Details */}
+                              <div className="p-4 space-y-3 flex-1">
+                                {primary ? (
+                                  <div className="bg-slate-50 p-3 rounded-lg border border-slate-200/80">
+                                    <div className="flex items-center justify-between mb-1.5">
+                                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                                        Primary Resident
+                                      </span>
+                                      <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">
+                                        Owner / Head
+                                      </span>
+                                    </div>
+                                    <p className="font-bold text-xs text-slate-900 flex items-center">
+                                      <UserIcon className="w-3 h-3 mr-1 text-slate-400" />
+                                      {primary.name}
+                                    </p>
+                                    <p className="text-[11px] text-slate-600 flex items-center mt-0.5 truncate">
+                                      <Mail className="w-3 h-3 mr-1 text-slate-400 shrink-0" />
+                                      {primary.email}
+                                    </p>
+                                    {primary.phone && (
+                                      <p className="text-[10px] text-slate-500 mt-0.5">
+                                        📞 {primary.phone}
+                                      </p>
+                                    )}
+
+                                    {households.length > 0 && (
+                                      <div className="mt-2 pt-2 border-t border-slate-200/60">
+                                        <span className="text-[10px] font-bold text-slate-500 block mb-1">
+                                          Household Members ({households.length}):
+                                        </span>
+                                        <div className="flex flex-wrap gap-1">
+                                          {households.map((h) => (
+                                            <span
+                                              key={h.id}
+                                              className="text-[10px] bg-white border border-slate-200 text-slate-700 px-1.5 py-0.5 rounded font-medium"
+                                            >
+                                              {h.name}
+                                            </span>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <div className="bg-amber-50/60 border border-amber-200/80 p-3 rounded-lg text-amber-900">
+                                    <div className="flex items-center space-x-1.5 font-bold text-xs">
+                                      <Lock className="w-3.5 h-3.5 text-amber-600" />
+                                      <span>Vacant Unit (Unoccupied)</span>
+                                    </div>
+                                    <p className="text-[11px] text-amber-800/90 mt-1">
+                                      No resident assigned. Sign-in to this apartment is restricted to prevent unauthorized logins.
+                                    </p>
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Card Footer: Status Quick-Changer & Actions */}
+                              <div className="p-3 bg-slate-50 border-t border-slate-100 rounded-b-xl flex items-center justify-between gap-2">
+                                <div className="flex items-center space-x-1">
+                                  <span className="text-[10px] font-bold uppercase text-slate-500">Status:</span>
+                                  <select
+                                    value={uStatus}
+                                    onChange={(e) => handleUpdateUnitStatus(u, e.target.value as UnitOccupancyStatus)}
+                                    className="text-[11px] font-bold bg-white border border-slate-300 rounded px-2 py-1 text-slate-800 cursor-pointer shadow-2xs focus:ring-1 focus:ring-blue-500"
+                                  >
+                                    <option value="occupied">Occupied</option>
+                                    <option value="unoccupied">Unoccupied (Locked)</option>
+                                    <option value="rented">Rented (Tenant)</option>
+                                  </select>
+                                </div>
+
+                                <button
+                                  type="button"
+                                  onClick={() => handleQuickInviteToUnit(u)}
+                                  className="text-[11px] font-bold text-blue-600 hover:text-blue-800 bg-white border border-blue-200 hover:border-blue-300 px-2 py-1 rounded shadow-2xs transition flex items-center cursor-pointer"
+                                >
+                                  <Plus className="w-3 h-3 mr-0.5" /> Invite
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
+                </div>
+              ) : directorySubTab === "residents" ? (
                 <div className="space-y-4">
                   <div className="flex justify-between items-center">
                     <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700">Resident Directory</h4>

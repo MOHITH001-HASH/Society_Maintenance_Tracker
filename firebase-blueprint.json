@@ -11,6 +11,8 @@
         "unitsPerFloor": { "type": "number" },
         "totalApartments": { "type": "number" },
         "generatedUnits": { "type": "array", "items": { "type": "string" } },
+        "unitStatuses": { "type": "object" },
+        "unitDetails": { "type": "object" },
         "adminId": { "type": "string" },
         "adminEmail": { "type": "string" },
         "isSetupComplete": { "type": "boolean" },

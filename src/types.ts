@@ -1,3 +1,12 @@
+export type UnitOccupancyStatus = "occupied" | "unoccupied" | "rented";
+
+export interface UnitDetail {
+  status: UnitOccupancyStatus;
+  occupancyType?: "owner" | "tenant" | "vacant";
+  notes?: string;
+  updatedAt?: string;
+}
+
 export interface Society {
   id: string;
   name: string;
@@ -7,6 +16,8 @@ export interface Society {
   unitsPerFloor?: number;
   totalApartments: number;
   generatedUnits: string[];
+  unitStatuses?: Record<string, UnitOccupancyStatus>;
+  unitDetails?: Record<string, UnitDetail>;
   adminId?: string;
   adminEmail?: string;
   isSetupComplete: boolean;

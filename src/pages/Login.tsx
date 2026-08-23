@@ -3,8 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { signInWithPopup, GoogleAuthProvider, signInAnonymously } from "firebase/auth";
 import { doc, setDoc, getDoc, collection, query, where, getDocs, deleteDoc, updateDoc, onSnapshot, addDoc } from "firebase/firestore";
 import { auth, db } from "../lib/firebase";
-import { Society } from "../types";
-import { Building2, Plus, Users, ShieldCheck, MapPin, Mail, Phone, KeyRound, Sparkles, Check } from "lucide-react";
+import { Society, User as UserType } from "../types";
+import { Building2, Plus, Users, ShieldCheck, MapPin, Mail, Phone, KeyRound, Sparkles, Check, Lock, AlertTriangle, Home } from "lucide-react";
 import SocietyOnboardingModal from "../components/SocietyOnboardingModal";
 import OtpModal from "../components/OtpModal";
 
@@ -17,6 +17,9 @@ export default function Login() {
   const [error, setError] = useState("");
   const [loadingSocieties, setLoadingSocieties] = useState(true);
   
+  // Real-time society residents for occupancy validation
+  const [societyResidents, setSocietyResidents] = useState<UserType[]>([]);
+
   // Auth method tab: Google vs OTP
   const [authMethod, setAuthMethod] = useState<"google" | "otp">("google");
   const [otpContact, setOtpContact] = useState("");
@@ -49,7 +52,40 @@ export default function Login() {
     return () => unsubscribe();
   }, []);
 
+  // Real-time listener for residents in selected society to validate occupancy & primary residents
+  useEffect(() => {
+    if (!selectedSocietyId) {
+      setSocietyResidents([]);
+      return;
+    }
+    const qUsers = query(collection(db, "users"), where("societyId", "==", selectedSocietyId));
+    const unsubscribe = onSnapshot(qUsers, (snapshot) => {
+      const users = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as UserType));
+      setSocietyResidents(users);
+    }, (err) => {
+      console.error("Error fetching society residents:", err);
+    });
+    return () => unsubscribe();
+  }, [selectedSocietyId]);
+
   const selectedSociety = societies.find((s) => s.id === selectedSocietyId);
+
+  // Helper to determine unit occupancy status
+  const getUnitStatus = (unit: string): "occupied" | "unoccupied" | "rented" => {
+    if (selectedSociety?.unitStatuses && selectedSociety.unitStatuses[unit]) {
+      return selectedSociety.unitStatuses[unit];
+    }
+    const hasApprovedResident = societyResidents.some(
+      (u) => u.unitNumber === unit && u.status === "approved"
+    );
+    return hasApprovedResident ? "occupied" : "unoccupied";
+  };
+
+  const getPrimaryResidentForUnit = (unit: string) => {
+    return societyResidents.find(
+      (u) => u.unitNumber === unit && u.residentType === "primary" && u.status === "approved"
+    );
+  };
 
   const handleStartOtpFlow = () => {
     if (role === "resident") {
@@ -60,6 +96,34 @@ export default function Login() {
       if (!unitNumber.trim()) {
         setError("Please select or enter your Apartment / Unit number.");
         return;
+      }
+
+      const unitStatus = getUnitStatus(unitNumber.trim());
+      const rawContact = otpContact.trim().toLowerCase();
+      const isInvitedOrExisting = societyResidents.some(
+        (u) =>
+          u.unitNumber === unitNumber.trim() &&
+          ((otpContactType === "email" && u.email?.toLowerCase() === rawContact) ||
+            (otpContactType === "sms" && u.phone?.replace(/[^\d]/g, "") === rawContact.replace(/[^\d]/g, "")))
+      );
+
+      // Block uninvited login for unoccupied units
+      if (unitStatus === "unoccupied" && !isInvitedOrExisting) {
+        setError(
+          `🔒 Unit ${unitNumber} is designated as Unoccupied / Vacant. Registrations and logins for vacant units are locked. Please contact your Society Administrator to invite your email/phone before signing in.`
+        );
+        return;
+      }
+
+      // Check if primary resident collision
+      if (residentType === "primary" && (unitStatus === "occupied" || unitStatus === "rented")) {
+        const existingPrimary = getPrimaryResidentForUnit(unitNumber.trim());
+        if (existingPrimary && !isInvitedOrExisting) {
+          setError(
+            `Unit ${unitNumber} already has an active Primary Resident (${existingPrimary.name}). Please select 'Household Member' to request access.`
+          );
+          return;
+        }
       }
     }
     if (!otpContact.trim()) {
@@ -116,6 +180,18 @@ export default function Login() {
         existingDocId = docToCopy.id;
       }
       
+      // Resident Unoccupied Unit Security Check
+      if (role === "resident") {
+        const targetUnit = existingData?.unitNumber || unitNumber.trim();
+        const unitStatus = getUnitStatus(targetUnit);
+        if (unitStatus === "unoccupied" && !existingData) {
+          setError(
+            `🔒 Unit ${targetUnit} is currently Unoccupied / Vacant. You cannot sign in or register for this unit without a prior invitation from your Society Administrator.`
+          );
+          return;
+        }
+      }
+
       const userDoc = await getDoc(doc(db, "users", uid));
       if (!userDoc.exists()) {
         const isHousehold = role === "resident" && residentType === "household";
@@ -134,6 +210,17 @@ export default function Login() {
           invitedByName: existingData?.invitedByName || null,
           createdAt: existingData?.createdAt || new Date().toISOString()
         });
+
+        // If newly approved resident, mark unit as occupied in society document
+        if (role === "resident" && selectedSocietyId && unitNumber) {
+          try {
+            await updateDoc(doc(db, "societies", selectedSocietyId), {
+              [`unitStatuses.${unitNumber}`]: "occupied"
+            });
+          } catch (socErr) {
+            console.warn("Could not auto-update unitStatus:", socErr);
+          }
+        }
 
         // Delete orphan invitation doc if separate
         if (existingDocId && existingDocId !== uid) {
@@ -164,26 +251,50 @@ export default function Login() {
     try {
       const provider = new GoogleAuthProvider();
       const userCred = await signInWithPopup(auth, provider);
+      const emailLowerCase = userCred.user.email?.toLowerCase() || "";
       
       // Check if user already exists
       const userDoc = await getDoc(doc(db, "users", userCred.user.uid));
       
-      if (!userDoc.exists()) {
-        const emailLowerCase = userCred.user.email?.toLowerCase() || "";
+      // Check if there is an invited placeholder profile
+      const q = query(collection(db, "users"), where("email", "==", emailLowerCase));
+      const querySnapshot = await getDocs(q);
+      
+      let existingData: any = null;
+      let existingDocId: string | null = null;
+      
+      if (!querySnapshot.empty) {
+        const docToCopy = querySnapshot.docs[0];
+        existingData = docToCopy.data();
+        existingDocId = docToCopy.id;
+      }
+
+      // Security check on Unoccupied Units & Primary Resident collision
+      if (role === "resident") {
+        const targetUnit = existingData?.unitNumber || unitNumber.trim();
+        const unitStatus = getUnitStatus(targetUnit);
         
-        // Check if there is an invited placeholder profile
-        const q = query(collection(db, "users"), where("email", "==", emailLowerCase));
-        const querySnapshot = await getDocs(q);
-        
-        let existingData: any = null;
-        let existingDocId: string | null = null;
-        
-        if (!querySnapshot.empty) {
-          const docToCopy = querySnapshot.docs[0];
-          existingData = docToCopy.data();
-          existingDocId = docToCopy.id;
+        // Block vacant unit registration if not pre-invited by admin
+        if (unitStatus === "unoccupied" && !existingData && !userDoc.exists()) {
+          setError(
+            `🔒 Unit ${targetUnit} is currently designated as Unoccupied / Vacant. To protect resident security, registrations for unoccupied units are locked. Please contact your Society Administrator to invite you before signing in.`
+          );
+          return;
         }
 
+        // Check primary resident conflict if registering as primary
+        if (residentType === "primary" && (unitStatus === "occupied" || unitStatus === "rented") && !userDoc.exists()) {
+          const existingPrimary = getPrimaryResidentForUnit(targetUnit);
+          if (existingPrimary && existingPrimary.email?.toLowerCase() !== emailLowerCase && !existingData) {
+            setError(
+              `Unit ${targetUnit} already has an approved Primary Resident (${existingPrimary.name}). Please choose 'Household Member' to submit a join request.`
+            );
+            return;
+          }
+        }
+      }
+      
+      if (!userDoc.exists()) {
         const isHousehold = role === "resident" && residentType === "household";
         let initialStatus = isHousehold ? "pending" : "approved";
         
@@ -194,6 +305,7 @@ export default function Login() {
 
         const assignedSocietyId = existingData?.societyId || (role === "resident" ? selectedSocietyId : (selectedSocietyId || null));
         const newUserName = userCred.user.displayName || existingData?.name || "New User";
+        const assignedUnit = existingData?.unitNumber || (role === "resident" ? unitNumber : null);
         
         // Create new user profile linked to real UID
         await setDoc(doc(db, "users", userCred.user.uid), {
@@ -201,13 +313,24 @@ export default function Login() {
           name: newUserName,
           role: existingData?.role || role,
           societyId: assignedSocietyId,
-          unitNumber: existingData?.unitNumber || (role === "resident" ? unitNumber : null),
+          unitNumber: assignedUnit,
           residentType: existingData?.residentType || (role === "resident" ? residentType : null),
           status: initialStatus,
           invitedBy: existingData?.invitedBy || null,
           invitedByName: existingData?.invitedByName || null,
           createdAt: existingData?.createdAt || new Date().toISOString()
         });
+
+        // If newly approved resident, mark unit as occupied in society document
+        if (role === "resident" && assignedSocietyId && assignedUnit && initialStatus === "approved") {
+          try {
+            await updateDoc(doc(db, "societies", assignedSocietyId), {
+              [`unitStatuses.${assignedUnit}`]: "occupied"
+            });
+          } catch (socErr) {
+            console.warn("Could not auto-update unitStatus on society:", socErr);
+          }
+        }
 
         // Audit Log entry for user join
         if (assignedSocietyId) {
@@ -216,11 +339,11 @@ export default function Login() {
               societyId: assignedSocietyId,
               action: initialStatus === "approved" ? "Resident Joined" : "Household Registration Pending",
               category: "membership",
-              description: `${newUserName} (${emailLowerCase}) registered for Unit ${existingData?.unitNumber || unitNumber || 'Unassigned'} as ${existingData?.residentType || residentType || 'Resident'} (${initialStatus}).`,
+              description: `${newUserName} (${emailLowerCase}) registered for Unit ${assignedUnit || 'Unassigned'} as ${existingData?.residentType || residentType || 'Resident'} (${initialStatus}).`,
               actorId: userCred.user.uid,
               actorName: newUserName,
               actorRole: existingData?.role || role,
-              unitNumber: existingData?.unitNumber || (role === "resident" ? unitNumber : undefined),
+              unitNumber: assignedUnit || undefined,
               timestamp: new Date().toISOString()
             });
           } catch (e) {
@@ -244,6 +367,12 @@ export default function Login() {
           updates.societyId = selectedSocietyId;
         }
         if (role === "resident" && unitNumber && unitNumber !== existingData.unitNumber) {
+          // If changing unit, verify target unit status
+          const targetStatus = getUnitStatus(unitNumber);
+          if (targetStatus === "unoccupied") {
+            setError(`Cannot switch to Unit ${unitNumber} because it is marked as Unoccupied / Vacant.`);
+            return;
+          }
           updates.unitNumber = unitNumber;
         }
 
@@ -430,11 +559,20 @@ export default function Login() {
                     className="block w-full rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-900 bg-white shadow-2xs focus:border-blue-500 focus:outline-hidden focus:ring-1 focus:ring-blue-500 cursor-pointer"
                   >
                     <option value="">Select your Apartment Unit...</option>
-                    {selectedSociety.generatedUnits.map((unit) => (
-                      <option key={unit} value={unit}>
-                        Unit {unit}
-                      </option>
-                    ))}
+                    {selectedSociety.generatedUnits.map((u) => {
+                      const uStatus = getUnitStatus(u);
+                      const statusBadge =
+                        uStatus === "occupied"
+                          ? "● Occupied"
+                          : uStatus === "rented"
+                          ? "● Rented (Tenant)"
+                          : "○ Vacant / Unoccupied (Invite Required)";
+                      return (
+                        <option key={u} value={u}>
+                          Unit {u} ({statusBadge})
+                        </option>
+                      );
+                    })}
                   </select>
                 ) : (
                   <input
@@ -445,6 +583,32 @@ export default function Login() {
                     onChange={(e) => setUnitNumber(e.target.value)}
                     className="block w-full rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-900 bg-white shadow-2xs focus:border-blue-500 focus:outline-hidden focus:ring-1 focus:ring-blue-500"
                   />
+                )}
+
+                {unitNumber && getUnitStatus(unitNumber) === "unoccupied" && (
+                  <div className="mt-2 p-2.5 bg-amber-50 border border-amber-200 rounded-lg text-[11px] text-amber-900 flex items-start space-x-2 animate-in fade-in">
+                    <Lock className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
+                    <div>
+                      <span className="font-bold">Unit {unitNumber} is Unoccupied / Vacant</span>
+                      <p className="text-amber-800 mt-0.5">
+                        Logins to vacant units are restricted to prevent unauthorized account linking. Please contact your Society Admin to invite you before signing in.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {unitNumber && (getUnitStatus(unitNumber) === "occupied" || getUnitStatus(unitNumber) === "rented") && (
+                  <div className="mt-2 p-2 bg-slate-100 border border-slate-200 rounded-lg text-[11px] text-slate-700 flex items-center justify-between animate-in fade-in">
+                    <div className="flex items-center space-x-1.5 font-medium">
+                      <Home className="w-3.5 h-3.5 text-blue-600" />
+                      <span>Unit Status: <strong className="capitalize text-slate-900">{getUnitStatus(unitNumber)}</strong></span>
+                    </div>
+                    {getPrimaryResidentForUnit(unitNumber) && (
+                      <span className="text-[10px] text-slate-500 font-semibold truncate max-w-[140px]">
+                        Primary: {getPrimaryResidentForUnit(unitNumber)?.name}
+                      </span>
+                    )}
+                  </div>
                 )}
               </div>
 
