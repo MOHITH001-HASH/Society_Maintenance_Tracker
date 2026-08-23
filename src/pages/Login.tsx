@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { signInWithPopup, GoogleAuthProvider, signInAnonymously } from "firebase/auth";
+import { signInWithPopup, GoogleAuthProvider, signInAnonymously, signOut } from "firebase/auth";
 import { doc, setDoc, getDoc, collection, query, where, getDocs, deleteDoc, updateDoc, onSnapshot, addDoc } from "firebase/firestore";
 import { auth, db } from "../lib/firebase";
 import { Society, User as UserType } from "../types";
@@ -87,7 +87,71 @@ export default function Login() {
     );
   };
 
-  const handleStartOtpFlow = () => {
+  // Helper to check if a user contact is pre-registered or authorized for a specific unit
+  const isUserAuthorizedForUnit = (unit: string, emailOrPhone: string, existingDocUser?: any) => {
+    const normalized = emailOrPhone.trim().toLowerCase();
+    const cleanedDigits = normalized.replace(/[^\d]/g, "");
+
+    // 1. If existing profile doc already bound to this society and unit
+    if (
+      existingDocUser &&
+      existingDocUser.societyId === selectedSocietyId &&
+      existingDocUser.unitNumber === unit &&
+      (existingDocUser.status === "approved" || existingDocUser.status === "pending" || existingDocUser.status === "invited")
+    ) {
+      return true;
+    }
+
+    // 2. Check against society residents list in state
+    return societyResidents.some((u) => {
+      if (u.unitNumber !== unit) return false;
+      const uEmail = u.email?.trim().toLowerCase();
+      const uPhoneDigits = u.phone?.replace(/[^\d]/g, "");
+
+      const emailMatch = uEmail && uEmail === normalized;
+      const phoneMatch = uPhoneDigits && cleanedDigits.length >= 10 && uPhoneDigits.endsWith(cleanedDigits.slice(-10));
+
+      return (emailMatch || phoneMatch) && (u.status === "approved" || u.status === "pending" || u.status === "invited");
+    });
+  };
+
+  // Log unauthorized / unsuccessful access attempts for security auditing
+  const logUnauthorizedAttempt = async (
+    targetUnit: string,
+    attemptContact: string,
+    attemptName: string,
+    method: "google" | "otp",
+    reason: string
+  ) => {
+    if (!selectedSocietyId) return;
+    try {
+      const existingPrimary = getPrimaryResidentForUnit(targetUnit);
+      await addDoc(collection(db, "auditLogs"), {
+        societyId: selectedSocietyId,
+        action: "Unauthorized Unit Access Attempt",
+        category: "security",
+        description: `Security Incident: Unauthorized login attempt on Unit ${targetUnit}. User "${attemptName || 'Unknown'}" (${attemptContact}) was BLOCKED. Reason: ${reason}.`,
+        actorId: "unauthorized_attempt",
+        actorName: attemptName || "Unauthorized User",
+        actorRole: "blocked_guest",
+        unitNumber: targetUnit,
+        details: {
+          attemptedContact: attemptContact,
+          attemptedName: attemptName,
+          authMethod: method,
+          targetUnit: targetUnit,
+          registeredPrimary: existingPrimary ? `${existingPrimary.name} (${existingPrimary.email})` : "None",
+          reason: reason,
+          status: "BLOCKED"
+        },
+        timestamp: new Date().toISOString()
+      });
+    } catch (logErr) {
+      console.error("Failed to write security audit log:", logErr);
+    }
+  };
+
+  const handleStartOtpFlow = async () => {
     if (role === "resident") {
       if (!selectedSocietyId) {
         setError("Please select your Society or Apartment complex.");
@@ -98,34 +162,65 @@ export default function Login() {
         return;
       }
 
-      const unitStatus = getUnitStatus(unitNumber.trim());
-      const rawContact = otpContact.trim().toLowerCase();
-      const isInvitedOrExisting = societyResidents.some(
-        (u) =>
-          u.unitNumber === unitNumber.trim() &&
-          ((otpContactType === "email" && u.email?.toLowerCase() === rawContact) ||
-            (otpContactType === "sms" && u.phone?.replace(/[^\d]/g, "") === rawContact.replace(/[^\d]/g, "")))
-      );
+      if (!otpContact.trim()) {
+        setError(`Please enter your ${otpContactType === 'email' ? 'email address' : 'Indian mobile number (+91)'}.`);
+        return;
+      }
 
-      // Block uninvited login for unoccupied units
-      if (unitStatus === "unoccupied" && !isInvitedOrExisting) {
+      const targetUnit = unitNumber.trim();
+      const unitStatus = getUnitStatus(targetUnit);
+      const rawContact = otpContact.trim().toLowerCase();
+      const isAuthorized = isUserAuthorizedForUnit(targetUnit, rawContact);
+
+      // 1. Strict Occupied / Rented Unit Check
+      if ((unitStatus === "occupied" || unitStatus === "rented") && !isAuthorized) {
+        await logUnauthorizedAttempt(
+          targetUnit,
+          rawContact,
+          otpName || "OTP User",
+          "otp",
+          `Unit ${targetUnit} is occupied and contact is not registered for this unit (This is not their unit)`
+        );
         setError(
-          `🔒 Unit ${unitNumber} is designated as Unoccupied / Vacant. Registrations and logins for vacant units are locked. Please contact your Society Administrator to invite your email/phone before signing in.`
+          `🚫 Access Denied: Unit ${targetUnit} is an occupied apartment. This is not your unit. Only registered residents and verified household members of Unit ${targetUnit} can log in.`
         );
         return;
       }
 
-      // Check if primary resident collision
+      // 2. Strict Vacant / Unoccupied Unit Check
+      if (unitStatus === "unoccupied" && !isAuthorized) {
+        await logUnauthorizedAttempt(
+          targetUnit,
+          rawContact,
+          otpName || "OTP User",
+          "otp",
+          `Unit ${targetUnit} is vacant and contact is not pre-invited by admin`
+        );
+        setError(
+          `🔒 Access Denied: Unit ${targetUnit} is designated as Unoccupied / Vacant. Registrations and logins for vacant units are locked to protect resident privacy. Please contact your Society Administrator to invite you before signing in.`
+        );
+        return;
+      }
+
+      // 3. Primary Resident collision check
       if (residentType === "primary" && (unitStatus === "occupied" || unitStatus === "rented")) {
-        const existingPrimary = getPrimaryResidentForUnit(unitNumber.trim());
-        if (existingPrimary && !isInvitedOrExisting) {
+        const existingPrimary = getPrimaryResidentForUnit(targetUnit);
+        if (existingPrimary && !isAuthorized) {
+          await logUnauthorizedAttempt(
+            targetUnit,
+            rawContact,
+            otpName || "OTP User",
+            "otp",
+            `Attempted to claim primary residency on already occupied Unit ${targetUnit}`
+          );
           setError(
-            `Unit ${unitNumber} already has an active Primary Resident (${existingPrimary.name}). Please select 'Household Member' to request access.`
+            `Unit ${targetUnit} already has an active Primary Resident (${existingPrimary.name}). Please select 'Household Member' to request access.`
           );
           return;
         }
       }
     }
+
     if (!otpContact.trim()) {
       setError(`Please enter your ${otpContactType === 'email' ? 'email address' : 'Indian mobile number (+91)'}.`);
       return;
@@ -163,8 +258,6 @@ export default function Login() {
       }
 
       const userDisplayName = otpName.trim() || (otpContactType === "email" ? contactVal.split("@")[0] : `Resident ${unitNumber || ''}`);
-      localStorage.setItem("society_session_email", otpContactType === "email" ? contactVal : `${uid.slice(0, 6)}@society.internal`);
-      localStorage.setItem("society_session_name", userDisplayName);
 
       // Check if this contact matches an existing user or pending invitation
       const q = query(
@@ -180,17 +273,43 @@ export default function Login() {
         existingDocId = docToCopy.id;
       }
       
-      // Resident Unoccupied Unit Security Check
+      // Strict Security Check before creating or linking session
       if (role === "resident") {
         const targetUnit = existingData?.unitNumber || unitNumber.trim();
         const unitStatus = getUnitStatus(targetUnit);
-        if (unitStatus === "unoccupied" && !existingData) {
+        const isAuthorized = isUserAuthorizedForUnit(targetUnit, contactVal, existingData);
+
+        if ((unitStatus === "occupied" || unitStatus === "rented") && !isAuthorized) {
+          await logUnauthorizedAttempt(
+            targetUnit,
+            contactVal,
+            userDisplayName,
+            "otp",
+            `Unit ${targetUnit} is occupied and contact is not registered for this unit (This is not their unit)`
+          );
           setError(
-            `🔒 Unit ${targetUnit} is currently Unoccupied / Vacant. You cannot sign in or register for this unit without a prior invitation from your Society Administrator.`
+            `🚫 Access Denied: Unit ${targetUnit} is an occupied apartment. This is not your unit. Only registered residents of Unit ${targetUnit} can log in.`
+          );
+          return;
+        }
+
+        if (unitStatus === "unoccupied" && !isAuthorized) {
+          await logUnauthorizedAttempt(
+            targetUnit,
+            contactVal,
+            userDisplayName,
+            "otp",
+            `Unit ${targetUnit} is vacant and contact is not pre-invited by admin`
+          );
+          setError(
+            `🔒 Access Denied: Unit ${targetUnit} is currently Unoccupied / Vacant. Logins without administrator invitation are locked.`
           );
           return;
         }
       }
+
+      localStorage.setItem("society_session_email", otpContactType === "email" ? contactVal : `${uid.slice(0, 6)}@society.internal`);
+      localStorage.setItem("society_session_name", userDisplayName);
 
       const userDoc = await getDoc(doc(db, "users", uid));
       if (!userDoc.exists()) {
@@ -252,6 +371,7 @@ export default function Login() {
       const provider = new GoogleAuthProvider();
       const userCred = await signInWithPopup(auth, provider);
       const emailLowerCase = userCred.user.email?.toLowerCase() || "";
+      const userDisplayName = userCred.user.displayName || "Google User";
       
       // Check if user already exists
       const userDoc = await getDoc(doc(db, "users", userCred.user.uid));
@@ -269,23 +389,60 @@ export default function Login() {
         existingDocId = docToCopy.id;
       }
 
-      // Security check on Unoccupied Units & Primary Resident collision
+      // Security check on Occupied & Unoccupied Units
       if (role === "resident") {
-        const targetUnit = existingData?.unitNumber || unitNumber.trim();
+        const targetUnit = userDoc.exists() ? (userDoc.data().unitNumber || unitNumber.trim()) : (existingData?.unitNumber || unitNumber.trim());
         const unitStatus = getUnitStatus(targetUnit);
-        
-        // Block vacant unit registration if not pre-invited by admin
-        if (unitStatus === "unoccupied" && !existingData && !userDoc.exists()) {
+        const isAuthorized = isUserAuthorizedForUnit(
+          targetUnit,
+          emailLowerCase,
+          userDoc.exists() ? userDoc.data() : existingData
+        );
+
+        // 1. Strict Occupied Unit Check: If unit is occupied/rented, only registered or invited emails can sign in!
+        if ((unitStatus === "occupied" || unitStatus === "rented") && !isAuthorized) {
+          await logUnauthorizedAttempt(
+            targetUnit,
+            emailLowerCase,
+            userDisplayName,
+            "google",
+            `Unit ${targetUnit} is occupied and email is not registered for this unit (This is not their unit)`
+          );
+          await signOut(auth);
           setError(
-            `🔒 Unit ${targetUnit} is currently designated as Unoccupied / Vacant. To protect resident security, registrations for unoccupied units are locked. Please contact your Society Administrator to invite you before signing in.`
+            `🚫 Access Denied: Unit ${targetUnit} is an occupied apartment. This is not your unit. Only registered residents and verified household members of Unit ${targetUnit} can log in.`
+          );
+          return;
+        }
+        
+        // 2. Strict Vacant Unit Check: Block vacant unit registration if not pre-invited by admin
+        if (unitStatus === "unoccupied" && !isAuthorized) {
+          await logUnauthorizedAttempt(
+            targetUnit,
+            emailLowerCase,
+            userDisplayName,
+            "google",
+            `Unit ${targetUnit} is vacant and email is not pre-invited by admin`
+          );
+          await signOut(auth);
+          setError(
+            `🔒 Access Denied: Unit ${targetUnit} is currently designated as Unoccupied / Vacant. Registrations and logins for vacant units are locked to prevent unauthorized account linking. Please contact your Society Administrator to invite you before signing in.`
           );
           return;
         }
 
-        // Check primary resident conflict if registering as primary
-        if (residentType === "primary" && (unitStatus === "occupied" || unitStatus === "rented") && !userDoc.exists()) {
+        // 3. Check primary resident conflict if registering as primary
+        if (residentType === "primary" && (unitStatus === "occupied" || unitStatus === "rented") && !userDoc.exists() && !isAuthorized) {
           const existingPrimary = getPrimaryResidentForUnit(targetUnit);
-          if (existingPrimary && existingPrimary.email?.toLowerCase() !== emailLowerCase && !existingData) {
+          if (existingPrimary && existingPrimary.email?.toLowerCase() !== emailLowerCase) {
+            await logUnauthorizedAttempt(
+              targetUnit,
+              emailLowerCase,
+              userDisplayName,
+              "google",
+              `Attempted to claim primary residency on already occupied Unit ${targetUnit}`
+            );
+            await signOut(auth);
             setError(
               `Unit ${targetUnit} already has an approved Primary Resident (${existingPrimary.name}). Please choose 'Household Member' to submit a join request.`
             );
@@ -367,10 +524,31 @@ export default function Login() {
           updates.societyId = selectedSocietyId;
         }
         if (role === "resident" && unitNumber && unitNumber !== existingData.unitNumber) {
-          // If changing unit, verify target unit status
+          // If changing unit, verify target unit status & authorization
           const targetStatus = getUnitStatus(unitNumber);
-          if (targetStatus === "unoccupied") {
-            setError(`Cannot switch to Unit ${unitNumber} because it is marked as Unoccupied / Vacant.`);
+          const isTargetAuthorized = isUserAuthorizedForUnit(unitNumber, emailLowerCase, existingData);
+          if ((targetStatus === "occupied" || targetStatus === "rented") && !isTargetAuthorized) {
+            await logUnauthorizedAttempt(
+              unitNumber,
+              emailLowerCase,
+              userDisplayName,
+              "google",
+              `Existing user tried to switch to occupied Unit ${unitNumber} without registration (This is not their unit)`
+            );
+            await signOut(auth);
+            setError(`🚫 Cannot switch to Unit ${unitNumber}: This is not your unit.`);
+            return;
+          }
+          if (targetStatus === "unoccupied" && !isTargetAuthorized) {
+            await logUnauthorizedAttempt(
+              unitNumber,
+              emailLowerCase,
+              userDisplayName,
+              "google",
+              `Existing user tried to switch to vacant Unit ${unitNumber} without invitation`
+            );
+            await signOut(auth);
+            setError(`🔒 Cannot switch to Unit ${unitNumber} because it is marked as Unoccupied / Vacant.`);
             return;
           }
           updates.unitNumber = unitNumber;

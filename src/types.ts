@@ -69,7 +69,7 @@ export interface AuditLog {
   id?: string;
   societyId?: string;
   action: string;
-  category?: "membership" | "complaint" | "notice" | "system";
+  category?: "membership" | "complaint" | "notice" | "system" | "security" | "unit_management";
   description: string;
   actorId?: string;
   actorName?: string;

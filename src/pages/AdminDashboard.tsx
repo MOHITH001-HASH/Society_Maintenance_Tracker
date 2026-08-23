@@ -1830,6 +1830,35 @@ export default function AdminDashboard() {
                                     </p>
                                   </div>
                                 )}
+
+                                {/* Security Incident Indicator for Unit */}
+                                {(() => {
+                                  const unitSecurityAlerts = auditLogs.filter(
+                                    (l) => l.unitNumber === u && l.category === "security"
+                                  );
+                                  if (unitSecurityAlerts.length === 0) return null;
+                                  return (
+                                    <div
+                                      onClick={() => {
+                                        setActiveTab("logs");
+                                        setLogCategoryFilter("security");
+                                        setLogSearchQuery(u);
+                                      }}
+                                      className="p-2 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg cursor-pointer transition flex items-center justify-between group"
+                                      title="Click to view blocked intrusion logs for this unit"
+                                    >
+                                      <div className="flex items-center space-x-1.5 text-[11px] font-bold text-red-700">
+                                        <ShieldAlert className="w-3.5 h-3.5 text-red-600 shrink-0 animate-pulse" />
+                                        <span>
+                                          {unitSecurityAlerts.length} Blocked Login Attempt{unitSecurityAlerts.length > 1 ? "s" : ""}
+                                        </span>
+                                      </div>
+                                      <span className="text-[10px] font-bold text-red-600 group-hover:underline flex items-center">
+                                        View Log →
+                                      </span>
+                                    </div>
+                                  );
+                                })()}
                               </div>
 
                               {/* Card Footer: Status Quick-Changer & Actions */}
@@ -2359,10 +2388,18 @@ export default function AdminDashboard() {
               </div>
 
               {/* Log Category Metrics */}
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-6 gap-3">
                 <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-2xs">
                   <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Total Records</p>
                   <p className="text-xl font-black text-slate-900 mt-0.5">{auditLogs.length}</p>
+                </div>
+                <div className="bg-white p-3.5 rounded-xl border border-red-200 shadow-2xs bg-red-50/40">
+                  <p className="text-[11px] font-bold text-red-600 uppercase tracking-wider flex items-center">
+                    <ShieldAlert className="w-3 h-3 mr-1 text-red-600" /> Security Violations
+                  </p>
+                  <p className="text-xl font-black text-red-600 mt-0.5">
+                    {auditLogs.filter(l => l.category === 'security').length}
+                  </p>
                 </div>
                 <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-2xs">
                   <p className="text-[11px] font-bold text-indigo-600 uppercase tracking-wider">Membership</p>
@@ -2382,7 +2419,7 @@ export default function AdminDashboard() {
                     {auditLogs.filter(l => l.category === 'notice').length}
                   </p>
                 </div>
-                <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-2xs col-span-2 sm:col-span-1">
+                <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-2xs">
                   <p className="text-[11px] font-bold text-emerald-600 uppercase tracking-wider">System / Staff</p>
                   <p className="text-xl font-black text-emerald-600 mt-0.5">
                     {auditLogs.filter(l => l.category === 'system' || !l.category).length}
@@ -2414,19 +2451,34 @@ export default function AdminDashboard() {
 
                 {/* Category Pills */}
                 <div className="flex flex-wrap items-center gap-1.5">
-                  {(["All", "membership", "complaint", "notice", "system"] as const).map(cat => {
+                  {(["All", "security", "membership", "complaint", "notice", "system"] as const).map(cat => {
                     const isActive = logCategoryFilter === cat;
+                    const count = cat === "All" ? auditLogs.length : auditLogs.filter(l => l.category === cat).length;
                     return (
                       <button
                         key={cat}
                         onClick={() => setLogCategoryFilter(cat)}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-bold capitalize transition shadow-2xs ${
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold capitalize transition shadow-2xs flex items-center space-x-1.5 ${
                           isActive
-                            ? "bg-blue-600 text-white shadow-xs"
+                            ? cat === "security"
+                              ? "bg-red-600 text-white shadow-xs"
+                              : "bg-blue-600 text-white shadow-xs"
+                            : cat === "security" && count > 0
+                            ? "bg-red-50 text-red-700 border border-red-200 hover:bg-red-100"
                             : "bg-slate-100 text-slate-700 hover:bg-slate-200"
                         }`}
                       >
-                        {cat === "All" ? "All Events" : cat}
+                        {cat === "security" && <ShieldAlert className="w-3 h-3" />}
+                        <span>{cat === "All" ? "All Events" : cat === "security" ? "Security Alerts" : cat}</span>
+                        {count > 0 && (
+                          <span
+                            className={`text-[10px] px-1.5 py-0.2 rounded-full font-black ${
+                              isActive ? "bg-white/20 text-white" : "bg-slate-200 text-slate-800"
+                            }`}
+                          >
+                            {count}
+                          </span>
+                        )}
                       </button>
                     );
                   })}
@@ -2446,23 +2498,35 @@ export default function AdminDashboard() {
                   {filteredAuditLogs.map(log => {
                     const d = new Date(log.timestamp);
                     const formattedDate = format(d, "MMM d, yyyy 'at' h:mm:ss a");
+                    const isSecurity = log.category === 'security';
                     
                     const catBg = 
+                      isSecurity ? 'bg-red-600 text-white' :
                       log.category === 'membership' ? 'bg-indigo-100 text-indigo-800' :
                       log.category === 'complaint' ? 'bg-blue-100 text-blue-800' :
                       log.category === 'notice' ? 'bg-purple-100 text-purple-800' :
                       'bg-emerald-100 text-emerald-800';
 
                     return (
-                      <div key={log.id} className="p-4 hover:bg-slate-50/80 transition-colors space-y-2">
+                      <div 
+                        key={log.id} 
+                        className={`p-4 transition-colors space-y-2 ${
+                          isSecurity ? "bg-red-50/60 border-l-4 border-l-red-600 hover:bg-red-50" : "hover:bg-slate-50/80"
+                        }`}
+                      >
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <div className="flex items-center space-x-2">
-                            <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider ${catBg}`}>
-                              {log.category || 'Event'}
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider inline-flex items-center gap-1 ${catBg}`}>
+                              {isSecurity && <ShieldAlert className="w-2.5 h-2.5 text-white" />}
+                              {log.category === 'security' ? 'Security Violation' : log.category || 'Event'}
                             </span>
-                            <h5 className="font-bold text-xs text-slate-900">{log.action}</h5>
+                            <h5 className={`font-bold text-xs ${isSecurity ? 'text-red-900 font-black' : 'text-slate-900'}`}>
+                              {log.action}
+                            </h5>
                             {log.unitNumber && (
-                              <span className="px-2 py-0.2 bg-slate-100 text-slate-700 border border-slate-200 rounded text-[10px] font-bold">
+                              <span className={`px-2 py-0.2 rounded text-[10px] font-bold border ${
+                                isSecurity ? 'bg-red-100 text-red-800 border-red-300' : 'bg-slate-100 text-slate-700 border-slate-200'
+                              }`}>
                                 Unit {log.unitNumber}
                               </span>
                             )}
@@ -2474,20 +2538,20 @@ export default function AdminDashboard() {
                           </div>
                         </div>
 
-                        <p className="text-xs text-slate-700 whitespace-pre-line leading-relaxed">
+                        <p className={`text-xs whitespace-pre-line leading-relaxed ${isSecurity ? 'text-red-900 font-medium' : 'text-slate-700'}`}>
                           {log.description}
                         </p>
 
                         <div className="flex flex-wrap items-center gap-3 pt-1 text-[10px] text-slate-500 font-medium">
                           {log.actorName && (
                             <span className="inline-flex items-center">
-                              <span className="font-bold text-slate-700 mr-1">Actor:</span> 
+                              <span className="font-bold text-slate-700 mr-1">Actor / Attempt:</span> 
                               {log.actorName} ({log.actorRole || 'user'})
                             </span>
                           )}
                           {log.targetId && (
                             <span className="inline-flex items-center">
-                              <span className="font-bold text-slate-700 mr-1">Target ID:</span> 
+                              <span className="font-bold text-slate-700 mr-1">Target ID / Email:</span> 
                               <code className="bg-slate-100 px-1.5 py-0.5 rounded text-slate-800 font-mono text-[9px]">
                                 {log.targetId}
                               </code>
@@ -2508,6 +2572,16 @@ export default function AdminDashboard() {
                               {log.details.assignedStaffName && log.details.assignedStaffName !== "None" && (
                                 <span className="px-1.5 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded">
                                   Staff: {log.details.assignedStaffName}
+                                </span>
+                              )}
+                              {log.details.attemptedContact && (
+                                <span className="px-1.5 py-0.5 bg-red-100 text-red-800 border border-red-300 rounded font-semibold">
+                                  Blocked Identifier: {log.details.attemptedContact}
+                                </span>
+                              )}
+                              {log.details.reason && (
+                                <span className="px-1.5 py-0.5 bg-red-100 text-red-800 border border-red-300 rounded font-semibold">
+                                  Reason: {log.details.reason}
                                 </span>
                               )}
                             </div>
