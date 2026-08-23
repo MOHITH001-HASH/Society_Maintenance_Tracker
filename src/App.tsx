@@ -8,6 +8,7 @@ import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import Login from "./pages/Login";
 import AdminDashboard from "./pages/AdminDashboard";
 import ResidentDashboard from "./pages/ResidentDashboard";
+import ProjectReport from "./pages/ProjectReport";
 import { ReactNode } from "react";
 import { auth } from "./lib/firebase";
 import { signOut } from "firebase/auth";
@@ -65,6 +66,7 @@ export default function App() {
       <Router>
         <Routes>
           <Route path="/login" element={<Login />} />
+          <Route path="/report" element={<ProjectReport />} />
           <Route 
             path="/admin" 
             element={

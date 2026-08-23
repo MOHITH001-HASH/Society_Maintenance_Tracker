@@ -937,6 +937,16 @@ export default function AdminDashboard() {
             <UserIcon className="w-4 h-4 mr-3 shrink-0" />
             My Profile
           </button>
+
+          <a
+            href="/report"
+            target="_blank"
+            rel="noreferrer"
+            className="w-full flex items-center px-3 py-2.5 text-xs font-bold rounded-lg transition-colors bg-blue-950/60 hover:bg-blue-900/80 text-blue-300 border border-blue-800/60 mt-2"
+          >
+            <FileText className="w-4 h-4 mr-3 shrink-0 text-blue-400" />
+            Project Report (PDF)
+          </a>
         </div>
         
         {/* User Info & Signout */}
