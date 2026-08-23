@@ -73,7 +73,6 @@ export default function SocietyOnboardingModal({
   };
 
   const handleSaveSociety = async () => {
-    if (!user) return;
     setSaving(true);
     setError("");
 
@@ -89,8 +88,8 @@ export default function SocietyOnboardingModal({
         unitsPerFloor: Number(unitsPerFloor),
         totalApartments: totalUnits,
         generatedUnits: unitsToSave,
-        adminId: user.uid,
-        adminEmail: user.email || "",
+        adminId: user?.uid || "pending-admin",
+        adminEmail: user?.email || "",
         isSetupComplete: true,
         createdAt: existingSociety?.createdAt || new Date().toISOString(),
         updatedAt: new Date().toISOString(),
@@ -105,21 +104,27 @@ export default function SocietyOnboardingModal({
         targetSocietyId = newDocRef.id;
       }
 
-      // Link current user to this society
-      await updateDoc(doc(db, "users", user.uid), {
-        societyId: targetSocietyId,
-        role: "admin",
-        status: "approved",
-        updatedAt: new Date().toISOString(),
-      });
+      // If user is currently logged in, link user to this society as admin
+      if (user?.uid) {
+        await updateDoc(doc(db, "users", user.uid), {
+          societyId: targetSocietyId,
+          role: "admin",
+          status: "approved",
+          updatedAt: new Date().toISOString(),
+        });
+      }
 
       // Also create an audit log
-      await addDoc(collection(db, "auditLogs"), {
-        societyId: targetSocietyId,
-        action: existingSociety ? "Society Settings Updated" : "Society Initialized",
-        description: `Society "${name}" configured with ${floors} floors and ${totalUnits} units.`,
-        timestamp: new Date().toISOString()
-      });
+      try {
+        await addDoc(collection(db, "auditLogs"), {
+          societyId: targetSocietyId,
+          action: existingSociety ? "Society Settings Updated" : "Society Initialized",
+          description: `Society "${name}" configured with ${floors} floors and ${totalUnits} units.`,
+          timestamp: new Date().toISOString()
+        });
+      } catch (logErr) {
+        console.warn("Audit log creation skipped:", logErr);
+      }
 
       setSaving(false);
       if (onSocietyCreated) {

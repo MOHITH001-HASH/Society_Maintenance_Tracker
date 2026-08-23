@@ -13,7 +13,7 @@ import ImageLightboxModal from "../components/ImageLightboxModal";
 import ComplaintHistoryModal from "../components/ComplaintHistoryModal";
 
 export default function ResidentDashboard() {
-  const { user, userProfile } = useAuth();
+  const { user, userProfile, signOut } = useAuth();
   
   // Default tab explicitly directed towards Notices first
   const [activeTab, setActiveTab] = useState<"notices" | "complaints" | "household" | "profile">("notices");
@@ -558,7 +558,7 @@ export default function ResidentDashboard() {
              </div>
           </div>
           <button
-            onClick={() => auth.signOut()}
+            onClick={() => signOut()}
             className="w-full flex items-center justify-center px-3 py-2 text-xs font-semibold text-slate-300 rounded-lg hover:bg-slate-800 hover:text-white transition-colors border border-slate-800"
           >
             <LogOut className="w-3.5 h-3.5 mr-2" />
@@ -579,7 +579,7 @@ export default function ResidentDashboard() {
                 </h1>
             </div>
              <button
-              onClick={() => auth.signOut()}
+              onClick={() => signOut()}
               className="text-slate-300 hover:text-white p-1"
              >
                <LogOut className="w-5 h-5" />

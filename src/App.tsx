@@ -14,7 +14,7 @@ import { signOut } from "firebase/auth";
 import { Clock, RefreshCw, LogOut, ShieldAlert } from "lucide-react";
 
 function PrivateRoute({ children, role }: { children: ReactNode; role?: "admin" | "resident" }) {
-  const { user, userProfile, loading } = useAuth();
+  const { user, userProfile, loading, signOut } = useAuth();
   
   if (loading) return <div className="min-h-screen flex items-center justify-center bg-slate-50 text-xs text-slate-500 font-bold">Loading Society Portal...</div>;
   if (!user || !userProfile) return <Navigate to="/login" replace />;
@@ -40,13 +40,13 @@ function PrivateRoute({ children, role }: { children: ReactNode; role?: "admin" 
           <div className="flex flex-col sm:flex-row gap-2 justify-center">
             <button 
               onClick={() => window.location.reload()} 
-              className="inline-flex items-center justify-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-xs transition"
+              className="inline-flex items-center justify-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-xs transition cursor-pointer"
             >
               <RefreshCw className="w-3.5 h-3.5 mr-1.5" /> Refresh Status
             </button>
             <button 
-              onClick={() => signOut(auth)} 
-              className="inline-flex items-center justify-center px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold border border-slate-300 transition"
+              onClick={() => signOut()} 
+              className="inline-flex items-center justify-center px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold border border-slate-300 transition cursor-pointer"
             >
               <LogOut className="w-3.5 h-3.5 mr-1.5" /> Sign Out
             </button>

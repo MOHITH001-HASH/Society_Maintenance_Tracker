@@ -15,7 +15,7 @@ import ImageLightboxModal from "../components/ImageLightboxModal";
 import ComplaintHistoryModal from "../components/ComplaintHistoryModal";
 
 export default function AdminDashboard() {
-  const { user, userProfile } = useAuth();
+  const { user, userProfile, signOut } = useAuth();
   const [activeTab, setActiveTab] = useState<"complaints" | "notices" | "directory" | "logs" | "settings" | "profile">("complaints");
   const [directorySubTab, setDirectorySubTab] = useState<"residents" | "approvals" | "staff">("residents");
   
@@ -92,6 +92,80 @@ export default function AdminDashboard() {
   const [showAddStaff, setShowAddStaff] = useState(false);
   const [editingStaffId, setEditingStaffId] = useState<string | null>(null);
   const [editStaffData, setEditStaffData] = useState<Partial<Staff>>({});
+
+  // Direct Resident Addition State
+  const [showAddResident, setShowAddResident] = useState(false);
+  const [newResident, setNewResident] = useState({
+    name: "",
+    email: "",
+    phone: "",
+    unitNumber: "",
+    residentType: "primary" as "primary" | "household",
+  });
+
+  const handleAddResident = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!newResident.name || !newResident.email || !newResident.unitNumber || !selectedSocietyId) {
+      alert("Please fill in Resident Name, Email, and Unit Number.");
+      return;
+    }
+
+    try {
+      const emailLower = newResident.email.trim().toLowerCase();
+      let phoneFormatted = newResident.phone.trim();
+      if (phoneFormatted) {
+        const cleaned = phoneFormatted.replace(/[^\d+]/g, "");
+        if (cleaned.startsWith("+91")) {
+          phoneFormatted = cleaned;
+        } else if (cleaned.length === 10) {
+          phoneFormatted = `+91 ${cleaned.slice(0, 5)} ${cleaned.slice(5)}`;
+        } else {
+          phoneFormatted = `+91 ${cleaned}`;
+        }
+      }
+
+      const newDocRef = await addDoc(collection(db, "users"), {
+        name: newResident.name.trim(),
+        email: emailLower,
+        phone: phoneFormatted,
+        role: "resident",
+        societyId: selectedSocietyId,
+        unitNumber: newResident.unitNumber.trim(),
+        residentType: newResident.residentType,
+        status: "approved",
+        createdAt: new Date().toISOString()
+      });
+
+      // Audit Log
+      await addDoc(collection(db, "auditLogs"), {
+        societyId: selectedSocietyId,
+        action: "Resident Added by Administrator",
+        category: "membership",
+        description: `Admin added resident ${newResident.name} (${emailLower}) for Unit ${newResident.unitNumber} (${newResident.residentType === 'household' ? 'Household Member' : 'Primary Resident'}).`,
+        actorId: userProfile?.id || user?.uid || "",
+        actorName: userProfile?.name || "Admin",
+        actorRole: "admin",
+        unitNumber: newResident.unitNumber.trim(),
+        targetId: newDocRef.id,
+        timestamp: new Date().toISOString()
+      });
+
+      // Send email invite / notification
+      await sendNotification(
+        'email',
+        emailLower,
+        `Welcome to ${currentSociety?.name || "Society Portal"} - Unit ${newResident.unitNumber}`,
+        `Hello ${newResident.name},\n\nYou have been registered as an approved resident for Unit ${newResident.unitNumber} at ${currentSociety?.name || "Society"}.\n\nYou can now sign in using Google or OTP with your email (${emailLower}) to access the maintenance ticketing system, notices, and household directory.`
+      );
+
+      setNewResident({ name: "", email: "", phone: "", unitNumber: "", residentType: "primary" });
+      setShowAddResident(false);
+      alert(`Resident ${newResident.name} added successfully for Unit ${newResident.unitNumber}!`);
+    } catch (err: any) {
+      console.error("Error adding resident:", err);
+      alert("Failed to add resident: " + (err.message || "Unknown error"));
+    }
+  };
 
   // 1. Fetch all societies
   useEffect(() => {
@@ -799,7 +873,7 @@ export default function AdminDashboard() {
              </div>
           </div>
           <button
-            onClick={() => auth.signOut()}
+            onClick={() => signOut()}
             className="w-full flex items-center justify-center px-3 py-2 text-xs font-semibold text-slate-300 rounded-lg hover:bg-slate-800 hover:text-white transition-colors border border-slate-800"
           >
             <LogOut className="w-3.5 h-3.5 mr-2" />
@@ -819,7 +893,7 @@ export default function AdminDashboard() {
                 </h1>
             </div>
              <button
-              onClick={() => auth.signOut()}
+              onClick={() => signOut()}
               className="text-slate-300 hover:text-white p-1"
              >
                <LogOut className="w-5 h-5" />
@@ -1325,45 +1399,184 @@ export default function AdminDashboard() {
               </div>
 
               {directorySubTab === "residents" ? (
-                <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-2xs">
-                  <div className="p-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center">
                     <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700">Resident Directory</h4>
-                    <span className="text-xs text-slate-500 font-semibold">{currentSociety?.name}</span>
+                    <button
+                      onClick={() => setShowAddResident(!showAddResident)}
+                      className="px-3 py-1.5 bg-blue-600 text-white text-xs font-bold rounded-lg shadow-2xs hover:bg-blue-700 flex items-center transition cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5 mr-1" /> Add / Invite Resident
+                    </button>
                   </div>
-                  <div className="overflow-x-auto">
-                    <table className="min-w-full divide-y divide-slate-100 text-left text-xs">
-                      <thead className="bg-slate-50 text-slate-500 font-bold uppercase tracking-wider">
-                        <tr>
-                          <th className="px-4 py-3">Resident</th>
-                          <th className="px-4 py-3">Unit Number</th>
-                          <th className="px-4 py-3">Resident Type</th>
-                          <th className="px-4 py-3">Contact</th>
-                          <th className="px-4 py-3">Joined Date</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 font-medium text-slate-800">
-                        {usersList.filter(u => u.role === 'resident' && u.status === 'approved').map(res => (
-                          <tr key={res.id} className="hover:bg-slate-50/80">
-                            <td className="px-4 py-3 font-bold text-slate-900">{res.name}</td>
-                            <td className="px-4 py-3 font-bold text-blue-600">Unit {res.unitNumber}</td>
-                            <td className="px-4 py-3">
-                              <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 text-slate-700">
-                                {res.residentType === 'household' ? 'Household Member' : 'Primary Resident'}
-                              </span>
-                            </td>
-                            <td className="px-4 py-3 text-slate-600">{res.email}</td>
-                            <td className="px-4 py-3 text-slate-400">{format(new Date(res.createdAt), "MMM d, yyyy")}</td>
-                          </tr>
-                        ))}
-                        {usersList.filter(u => u.role === 'resident' && u.status === 'approved').length === 0 && (
+
+                  {showAddResident && (
+                    <form onSubmit={handleAddResident} className="bg-white p-5 rounded-xl border border-blue-200 shadow-sm space-y-3 animate-in fade-in">
+                      <div className="flex justify-between items-center pb-2 border-b border-slate-100">
+                        <h5 className="text-xs font-bold text-slate-900 flex items-center">
+                          <Users className="w-3.5 h-3.5 mr-1.5 text-blue-600" />
+                          Add New Resident to {currentSociety?.name}
+                        </h5>
+                        <button 
+                          type="button" 
+                          onClick={() => setShowAddResident(false)}
+                          className="text-slate-400 hover:text-slate-600 text-xs"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+                        <div>
+                          <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">Full Name</label>
+                          <input
+                            type="text"
+                            required
+                            placeholder="e.g. Rahul Sharma"
+                            value={newResident.name}
+                            onChange={(e) => setNewResident({ ...newResident, name: e.target.value })}
+                            className="w-full px-3 py-1.5 text-xs rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">Email Address</label>
+                          <input
+                            type="email"
+                            required
+                            placeholder="rahul@example.com"
+                            value={newResident.email}
+                            onChange={(e) => setNewResident({ ...newResident, email: e.target.value })}
+                            className="w-full px-3 py-1.5 text-xs rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">Mobile Phone (India +91)</label>
+                          <input
+                            type="tel"
+                            placeholder="+91 98765 43210"
+                            value={newResident.phone}
+                            onChange={(e) => {
+                              let val = e.target.value;
+                              if (val && !val.startsWith("+91") && !val.startsWith("+")) {
+                                val = "+91 " + val.replace(/[^\d\s]/g, "");
+                              }
+                              setNewResident({ ...newResident, phone: val });
+                            }}
+                            className="w-full px-3 py-1.5 text-xs rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">Unit / Apartment #</label>
+                          {currentSociety?.generatedUnits && currentSociety.generatedUnits.length > 0 ? (
+                            <select
+                              required
+                              value={newResident.unitNumber}
+                              onChange={(e) => setNewResident({ ...newResident, unitNumber: e.target.value })}
+                              className="w-full px-3 py-1.5 text-xs rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500"
+                            >
+                              <option value="">Select Unit</option>
+                              {currentSociety.generatedUnits.map((u) => (
+                                <option key={u} value={u}>Unit {u}</option>
+                              ))}
+                            </select>
+                          ) : (
+                            <input
+                              type="text"
+                              required
+                              placeholder="e.g. 101, A-204"
+                              value={newResident.unitNumber}
+                              onChange={(e) => setNewResident({ ...newResident, unitNumber: e.target.value })}
+                              className="w-full px-3 py-1.5 text-xs rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500"
+                            />
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex justify-between items-center pt-2">
+                        <div className="flex items-center space-x-4">
+                          <label className="text-xs font-semibold text-slate-700 flex items-center cursor-pointer">
+                            <input
+                              type="radio"
+                              name="residentType"
+                              checked={newResident.residentType === "primary"}
+                              onChange={() => setNewResident({ ...newResident, residentType: "primary" })}
+                              className="mr-1.5 text-blue-600"
+                            />
+                            Primary Resident
+                          </label>
+                          <label className="text-xs font-semibold text-slate-700 flex items-center cursor-pointer">
+                            <input
+                              type="radio"
+                              name="residentType"
+                              checked={newResident.residentType === "household"}
+                              onChange={() => setNewResident({ ...newResident, residentType: "household" })}
+                              className="mr-1.5 text-blue-600"
+                            />
+                            Household Member
+                          </label>
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setShowAddResident(false)}
+                            className="px-3 py-1.5 text-xs text-slate-600 hover:text-slate-800"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="submit"
+                            className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold shadow-2xs transition"
+                          >
+                            Save & Activate Resident
+                          </button>
+                        </div>
+                      </div>
+                    </form>
+                  )}
+
+                  <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-2xs">
+                    <div className="p-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
+                      <span className="text-xs font-bold text-slate-700">Approved Residents ({usersList.filter(u => u.role === 'resident' && u.status === 'approved').length})</span>
+                      <span className="text-xs text-slate-500 font-semibold">{currentSociety?.name}</span>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full divide-y divide-slate-100 text-left text-xs">
+                        <thead className="bg-slate-50 text-slate-500 font-bold uppercase tracking-wider">
                           <tr>
-                            <td colSpan={5} className="px-4 py-8 text-center text-slate-400">
-                              No approved residents in this society yet.
-                            </td>
+                            <th className="px-4 py-3">Resident</th>
+                            <th className="px-4 py-3">Unit Number</th>
+                            <th className="px-4 py-3">Resident Type</th>
+                            <th className="px-4 py-3">Contact</th>
+                            <th className="px-4 py-3">Joined Date</th>
                           </tr>
-                        )}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 font-medium text-slate-800">
+                          {usersList.filter(u => u.role === 'resident' && u.status === 'approved').map(res => (
+                            <tr key={res.id} className="hover:bg-slate-50/80">
+                              <td className="px-4 py-3 font-bold text-slate-900">{res.name}</td>
+                              <td className="px-4 py-3 font-bold text-blue-600">Unit {res.unitNumber}</td>
+                              <td className="px-4 py-3">
+                                <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 text-slate-700">
+                                  {res.residentType === 'household' ? 'Household Member' : 'Primary Resident'}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 text-slate-600">
+                                <div>{res.email}</div>
+                                {res.phone && <div className="text-[10px] text-slate-400">{res.phone}</div>}
+                              </td>
+                              <td className="px-4 py-3 text-slate-400">{format(new Date(res.createdAt), "MMM d, yyyy")}</td>
+                            </tr>
+                          ))}
+                          {usersList.filter(u => u.role === 'resident' && u.status === 'approved').length === 0 && (
+                            <tr>
+                              <td colSpan={5} className="px-4 py-8 text-center text-slate-400">
+                                No approved residents in this society yet. Click "Add / Invite Resident" above to add one.
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 </div>
               ) : directorySubTab === "approvals" ? (

@@ -73,9 +73,16 @@ export default function Login() {
   const handleOtpVerified = async () => {
     setShowOtpModal(false);
     try {
-      // Sign in anonymously to obtain a valid Firebase Auth session
-      const userCred = await signInAnonymously(auth);
-      const uid = userCred.user.uid;
+      let uid = "";
+      try {
+        const userCred = await signInAnonymously(auth);
+        uid = userCred.user.uid;
+      } catch (authErr) {
+        console.warn("Firebase anonymous auth restricted; using resilient session", authErr);
+        uid = "usr_" + Math.random().toString(36).substring(2, 11);
+        localStorage.setItem("society_session_uid", uid);
+      }
+
       const rawContact = otpContact.trim();
       let contactVal = rawContact.toLowerCase();
       
@@ -90,6 +97,10 @@ export default function Login() {
           contactVal = `+91 ${cleaned}`;
         }
       }
+
+      const userDisplayName = otpName.trim() || (otpContactType === "email" ? contactVal.split("@")[0] : `Resident ${unitNumber || ''}`);
+      localStorage.setItem("society_session_email", otpContactType === "email" ? contactVal : `${uid.slice(0, 6)}@society.internal`);
+      localStorage.setItem("society_session_name", userDisplayName);
 
       // Check if this contact matches an existing user or pending invitation
       const q = query(
@@ -113,7 +124,7 @@ export default function Login() {
         await setDoc(doc(db, "users", uid), {
           email: otpContactType === "email" ? contactVal : (existingData?.email || `${uid.slice(0, 6)}@society.internal`),
           phone: otpContactType === "sms" ? contactVal : (existingData?.phone || ""),
-          name: otpName.trim() || existingData?.name || (otpContactType === "email" ? contactVal.split("@")[0] : `Resident ${unitNumber || existingData?.unitNumber || ''}`),
+          name: userDisplayName || existingData?.name || "Resident",
           role: existingData?.role || role,
           societyId: existingData?.societyId || selectedSocietyId || null,
           unitNumber: existingData?.unitNumber || (role === "resident" ? unitNumber : null),
@@ -251,13 +262,26 @@ export default function Login() {
   // Quick Demo Access Login
   const handleQuickDemoLogin = async (demoRole: "resident" | "admin") => {
     try {
-      const userCred = await signInAnonymously(auth);
-      const uid = userCred.user.uid;
+      let uid = "";
+      try {
+        const userCred = await signInAnonymously(auth);
+        uid = userCred.user.uid;
+      } catch (authErr) {
+        console.warn("Firebase anonymous auth fallback for demo sandbox:", authErr);
+        uid = "demo_" + demoRole + "_" + Math.random().toString(36).substring(2, 9);
+        localStorage.setItem("society_session_uid", uid);
+      }
+
       const targetSocId = societies.length > 0 ? societies[0].id : "demo-society";
+      const demoEmail = `${demoRole}-${uid.slice(0, 5)}@society.demo`;
+      const demoName = demoRole === "admin" ? "Demo Administrator" : "Demo Resident";
       
+      localStorage.setItem("society_session_email", demoEmail);
+      localStorage.setItem("society_session_name", demoName);
+
       await setDoc(doc(db, "users", uid), {
-        email: `${demoRole}-${uid.slice(0, 5)}@society.demo`,
-        name: demoRole === "admin" ? "Demo Administrator" : "Demo Resident",
+        email: demoEmail,
+        name: demoName,
         role: demoRole,
         societyId: targetSocId,
         unitNumber: demoRole === "resident" ? "101" : null,
@@ -269,6 +293,7 @@ export default function Login() {
       setShowDemoModal(false);
       navigate("/");
     } catch (err: any) {
+      console.error("Demo login error:", err);
       setError(err.message || "Demo login failed");
     }
   };

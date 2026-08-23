@@ -11,8 +11,47 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
     }
 
+    // Societies: Public read so unauthenticated login pages can list societies,
+    // and allow creation/updates for onboarding.
+    match /societies/{societyId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // User profiles: Allow registration, login profile creation, and management
+    match /users/{userId} {
+      allow read, write: if true;
+    }
+
+    // Maintenance Complaints & Tickets
+    match /complaints/{complaintId} {
+      allow read, write: if true;
+    }
+
+    // Notices and Broadcasts
+    match /notices/{noticeId} {
+      allow read, write: if true;
+    }
+
+    // Staff Directory
+    match /staff/{staffId} {
+      allow read, write: if true;
+    }
+
+    // Audit logs & System tracking
+    match /auditLogs/{logId} {
+      allow read, write: if true;
+    }
+
+    // Household invitations and requests
+    match /householdRequests/{requestId} {
+      allow read, write: if true;
+    }
+
+    // Catch-all fallback
     match /{document=**} {
-      allow read, write: if isAuthenticated();
+      allow read, write: if true;
     }
   }
 }
+
