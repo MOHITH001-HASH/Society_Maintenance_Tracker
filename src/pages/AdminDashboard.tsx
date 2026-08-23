@@ -21,11 +21,9 @@ export default function AdminDashboard() {
   const [unitSearchQuery, setUnitSearchQuery] = useState("");
   const [unitFloorFilter, setUnitFloorFilter] = useState("all");
   
-  // Multi-Tenant Societies State
-  const [societies, setSocieties] = useState<Society[]>([]);
+  // Multi-Tenant Societies State - Strictly isolated to current Admin's assigned society
   const [selectedSocietyId, setSelectedSocietyId] = useState<string>(userProfile?.societyId || "");
   const [showOnboardingModal, setShowOnboardingModal] = useState(false);
-  const [isCreatingNewSociety, setIsCreatingNewSociety] = useState(false);
   const [showDemoModal, setShowDemoModal] = useState(false);
   
   // Data lists scoped to selectedSocietyId with pagination limits
@@ -246,55 +244,57 @@ export default function AdminDashboard() {
     }
   };
 
-  // 1. Fetch all societies
+  // 1. Fetch & strictly isolate Admin to their designated society
   useEffect(() => {
-    const qSocieties = query(collection(db, "societies"));
-    const unsubSocieties = onSnapshot(qSocieties, (snapshot) => {
-      const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Society));
-      setSocieties(docs);
-      
-      // Auto-select society if none selected or if user has a profile societyId
-      if (!selectedSocietyId && docs.length > 0) {
-        const matching = userProfile?.societyId ? docs.find(d => d.id === userProfile.societyId) : null;
-        setSelectedSocietyId(matching ? matching.id : docs[0].id);
-      } else if (docs.length === 0) {
-        // No societies exist at all, trigger onboarding
-        setShowOnboardingModal(true);
-      }
-    });
-
-    return () => unsubSocieties();
-  }, [userProfile?.societyId]);
-
-  // 2. Fetch active society details & check if setup is needed
-  useEffect(() => {
-    if (!selectedSocietyId) {
-      setCurrentSociety(null);
-      return;
-    }
-
-    const unsubSocDoc = onSnapshot(doc(db, "societies", selectedSocietyId), (docSnap) => {
-      if (docSnap.exists()) {
-        const socData = { id: docSnap.id, ...docSnap.data() } as Society;
-        setCurrentSociety(socData);
-        setSettingsForm({
-          name: socData.name || socData.buildingName || "",
-          address: socData.address || "",
-          numberOfFloors: socData.numberOfFloors || 1,
-          unitsPerFloor: socData.unitsPerFloor || 1,
-          generatedUnits: socData.generatedUnits || []
-        });
-
-        if (!socData.isSetupComplete) {
+    // If user profile has assigned societyId, bind to it strictly
+    if (userProfile?.societyId) {
+      setSelectedSocietyId(userProfile.societyId);
+      const unsubSoc = onSnapshot(doc(db, "societies", userProfile.societyId), (docSnap) => {
+        if (docSnap.exists()) {
+          const socData = { id: docSnap.id, ...docSnap.data() } as Society;
+          setCurrentSociety(socData);
+          setSettingsForm({
+            name: socData.name || socData.buildingName || "",
+            address: socData.address || "",
+            numberOfFloors: socData.numberOfFloors || 1,
+            unitsPerFloor: socData.unitsPerFloor || 1,
+            generatedUnits: socData.generatedUnits || []
+          });
+          if (!socData.isSetupComplete) {
+            setShowOnboardingModal(true);
+          }
+        } else {
+          setCurrentSociety(null);
           setShowOnboardingModal(true);
         }
-      } else {
-        setCurrentSociety(null);
-      }
-    });
+      }, (err) => {
+        console.error("Error loading assigned society:", err);
+      });
+      return () => unsubSoc();
+    }
 
-    return () => unsubSocDoc();
-  }, [selectedSocietyId]);
+    // Fallback: If userProfile doesn't have societyId yet, check if admin created one
+    if (user?.uid || user?.email) {
+      const qAdminSoc = user?.email
+        ? query(collection(db, "societies"), where("adminEmail", "==", user.email.toLowerCase()))
+        : query(collection(db, "societies"), where("adminId", "==", user?.uid));
+
+      const unsubCheck = onSnapshot(qAdminSoc, (snapshot) => {
+        if (!snapshot.empty) {
+          const matchedSoc = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() } as Society;
+          setSelectedSocietyId(matchedSoc.id);
+          setCurrentSociety(matchedSoc);
+          if (user?.uid) {
+            updateDoc(doc(db, "users", user.uid), { societyId: matchedSoc.id }).catch(console.warn);
+          }
+        } else {
+          // No society configured for this admin - prompt onboarding
+          setShowOnboardingModal(true);
+        }
+      });
+      return () => unsubCheck();
+    }
+  }, [userProfile?.societyId, user?.uid, user?.email]);
 
   // 3. Listen to all sub-collections strictly filtered by selectedSocietyId
   useEffect(() => {
@@ -844,47 +844,33 @@ export default function AdminDashboard() {
           </div>
         </div>
 
-        {/* Society Switcher Header in Sidebar */}
+        {/* Isolated Single-Apartment Admin Scope in Sidebar */}
         <div className="p-4 border-b border-slate-800">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Current Society</span>
-            <button
-              onClick={() => {
-                setIsCreatingNewSociety(true);
-                setShowOnboardingModal(true);
-              }}
-              className="text-xs text-blue-400 hover:text-blue-300 font-bold flex items-center"
-              title="Create another society"
-            >
-              <Plus className="w-3.5 h-3.5 mr-0.5" /> New
-            </button>
-          </div>
+          <div className="bg-slate-900/90 border border-slate-700/70 rounded-xl p-3 shadow-inner">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="inline-flex items-center text-[10px] font-black uppercase tracking-wider text-emerald-400">
+                <ShieldCheck className="w-3.5 h-3.5 mr-1 text-emerald-400" /> Authorized Scope
+              </span>
+              <span className="text-[9px] font-black px-1.5 py-0.5 bg-emerald-950 text-emerald-300 border border-emerald-800 rounded">
+                Admin Locked
+              </span>
+            </div>
+            
+            <h4 className="text-xs font-black text-white truncate">
+              {currentSociety?.name || currentSociety?.buildingName || "Loading apartment..."}
+            </h4>
+            
+            {currentSociety?.address && (
+              <p className="text-[11px] text-slate-400 mt-1 truncate">
+                📍 {currentSociety.address}
+              </p>
+            )}
 
-          <div className="relative">
-            <select
-              value={selectedSocietyId}
-              onChange={(e) => {
-                setSelectedSocietyId(e.target.value);
-                if (user?.uid) {
-                  updateDoc(doc(db, "users", user.uid), { societyId: e.target.value });
-                }
-              }}
-              className="w-full bg-slate-800 border border-slate-700 text-white text-xs font-semibold rounded-lg px-3 py-2 appearance-none focus:outline-hidden focus:ring-1 focus:ring-blue-500 cursor-pointer pr-8"
-            >
-              {societies.map(s => (
-                <option key={s.id} value={s.id}>
-                  {s.name || s.buildingName}
-                </option>
-              ))}
-            </select>
-            <ChevronDown className="w-4 h-4 text-slate-400 absolute right-2.5 top-2.5 pointer-events-none" />
+            <div className="mt-2.5 pt-2 border-t border-slate-800 flex items-center justify-between text-[10px] text-slate-400 font-medium">
+              <span>{currentSociety?.numberOfFloors || 0} Floors • {currentSociety?.totalApartments || currentSociety?.generatedUnits?.length || 0} Units</span>
+              <span className="text-blue-400 font-semibold">Strict Tenant Isolation</span>
+            </div>
           </div>
-
-          {currentSociety && (
-            <p className="text-[11px] text-slate-400 mt-2 truncate">
-              📍 {currentSociety.address}
-            </p>
-          )}
         </div>
 
         {/* Navigation Tabs */}
@@ -1014,17 +1000,12 @@ export default function AdminDashboard() {
               <button onClick={() => setActiveTab('settings')} className={`px-3 py-1 text-xs font-bold rounded-lg ${activeTab === 'settings' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'}`}>Settings</button>
             </div>
             
-            {/* Action Bar & Demo Access */}
+            {/* Scope Badge & Demo Access */}
             <div className="flex items-center space-x-2">
-              <button
-                onClick={() => {
-                  setIsCreatingNewSociety(true);
-                  setShowOnboardingModal(true);
-                }}
-                className="inline-flex items-center bg-blue-50 text-blue-700 border border-blue-200 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-blue-100 transition shadow-2xs cursor-pointer"
-              >
-                <Plus className="w-3.5 h-3.5 mr-1" /> Add Society
-              </button>
+              <div className="hidden sm:inline-flex items-center bg-slate-100 border border-slate-200 text-slate-700 px-3 py-1.5 rounded-lg text-xs font-bold shadow-2xs">
+                <ShieldCheck className="w-3.5 h-3.5 mr-1.5 text-emerald-600" />
+                <span>Single-Complex Admin Scope</span>
+              </div>
               
               <button
                 onClick={() => setShowDemoModal(true)}
@@ -1051,10 +1032,9 @@ export default function AdminDashboard() {
               </div>
               <button
                 onClick={() => {
-                  setIsCreatingNewSociety(false);
                   setShowOnboardingModal(true);
                 }}
-                className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-lg shadow-2xs transition"
+                className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-lg shadow-2xs transition cursor-pointer"
               >
                 Configure Now
               </button>
@@ -2252,16 +2232,10 @@ export default function AdminDashboard() {
                   <h3 className="text-base font-bold text-slate-900">Society & Building Configuration</h3>
                   <p className="text-xs text-slate-500 mt-0.5">Edit parameters for the active society: <strong>{currentSociety?.name}</strong></p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsCreatingNewSociety(true);
-                    setShowOnboardingModal(true);
-                  }}
-                  className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold shadow-2xs transition"
-                >
-                  + Add Another Society
-                </button>
+                <div className="inline-flex items-center px-3 py-1 bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-bold rounded-lg shadow-2xs">
+                  <ShieldCheck className="w-3.5 h-3.5 mr-1 text-emerald-600" />
+                  <span>Assigned Complex</span>
+                </div>
               </div>
 
               <form onSubmit={handleSaveSettings} className="p-6 space-y-5">
@@ -2747,16 +2721,12 @@ export default function AdminDashboard() {
       {/* Society Onboarding Modal */}
       <SocietyOnboardingModal
         isOpen={showOnboardingModal}
-        existingSociety={isCreatingNewSociety ? null : currentSociety}
-        isDismissable={societies.length > 0}
-        onClose={() => {
-          setShowOnboardingModal(false);
-          setIsCreatingNewSociety(false);
-        }}
+        existingSociety={currentSociety}
+        isDismissable={!!currentSociety?.isSetupComplete}
+        onClose={() => setShowOnboardingModal(false)}
         onSocietyCreated={(newId) => {
           setSelectedSocietyId(newId);
           setShowOnboardingModal(false);
-          setIsCreatingNewSociety(false);
         }}
       />
 

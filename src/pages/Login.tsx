@@ -308,6 +308,40 @@ export default function Login() {
         }
       }
 
+      // Strict Admin Multi-Tenant Isolation Check for OTP
+      if (role === "admin") {
+        if (existingData?.role === "admin" && existingData?.societyId && selectedSocietyId && existingData.societyId !== selectedSocietyId) {
+          const assignedSoc = societies.find((s) => s.id === existingData.societyId);
+          await logUnauthorizedAttempt(
+            "ADMIN",
+            contactVal,
+            userDisplayName,
+            "otp",
+            `Admin of ${assignedSoc?.name || existingData.societyId} attempted unauthorized admin login to ${selectedSociety?.name || selectedSocietyId}`
+          );
+          setError(
+            `🚫 Unauthorized Admin Access: Your administrator credentials are registered for "${assignedSoc?.name || 'another apartment'}". You cannot enter or administer "${selectedSociety?.name || 'this apartment'}".`
+          );
+          return;
+        }
+
+        if (selectedSociety?.adminEmail && selectedSociety.adminEmail.toLowerCase() !== contactVal.toLowerCase()) {
+          if (!existingData || existingData.societyId !== selectedSocietyId || existingData.role !== "admin") {
+            await logUnauthorizedAttempt(
+              "ADMIN",
+              contactVal,
+              userDisplayName,
+              "otp",
+              `Unregistered user attempted admin login for "${selectedSociety.name}". Registered admin is ${selectedSociety.adminEmail}`
+            );
+            setError(
+              `🚫 Access Denied: "${selectedSociety.name}" already has an authorized administrator (${selectedSociety.adminEmail}). You are not authorized to administer this apartment.`
+            );
+            return;
+          }
+        }
+      }
+
       localStorage.setItem("society_session_email", otpContactType === "email" ? contactVal : `${uid.slice(0, 6)}@society.internal`);
       localStorage.setItem("society_session_name", userDisplayName);
 
@@ -445,6 +479,46 @@ export default function Login() {
             await signOut(auth);
             setError(
               `Unit ${targetUnit} already has an approved Primary Resident (${existingPrimary.name}). Please choose 'Household Member' to submit a join request.`
+            );
+            return;
+          }
+        }
+      }
+
+      // Strict Admin Multi-Tenant Isolation Check for Google Sign-In
+      if (role === "admin") {
+        const userDocData = userDoc.exists() ? userDoc.data() : existingData;
+
+        // 1. If admin is registered for a different society, block cross-apartment admin entry!
+        if (userDocData?.role === "admin" && userDocData?.societyId && selectedSocietyId && userDocData.societyId !== selectedSocietyId) {
+          const assignedSoc = societies.find((s) => s.id === userDocData.societyId);
+          await logUnauthorizedAttempt(
+            "ADMIN",
+            emailLowerCase,
+            userDisplayName,
+            "google",
+            `Admin of "${assignedSoc?.name || userDocData.societyId}" attempted unauthorized admin login to "${selectedSociety?.name || selectedSocietyId}"`
+          );
+          await signOut(auth);
+          setError(
+            `🚫 Unauthorized Admin Access: Your administrator credentials are registered for "${assignedSoc?.name || 'another apartment complex'}". You cannot enter or administer "${selectedSociety?.name || 'this apartment'}".`
+          );
+          return;
+        }
+
+        // 2. If the apartment complex already has a designated admin email that doesn't match
+        if (selectedSociety?.adminEmail && selectedSociety.adminEmail.toLowerCase() !== emailLowerCase) {
+          if (!userDocData || userDocData.societyId !== selectedSocietyId || userDocData.role !== "admin") {
+            await logUnauthorizedAttempt(
+              "ADMIN",
+              emailLowerCase,
+              userDisplayName,
+              "google",
+              `Unregistered user attempted admin login for "${selectedSociety.name}". Registered admin is ${selectedSociety.adminEmail}`
+            );
+            await signOut(auth);
+            setError(
+              `🚫 Access Denied: "${selectedSociety.name}" already has a registered administrator (${selectedSociety.adminEmail}). You are not authorized to administer this apartment complex.`
             );
             return;
           }
