@@ -1,0 +1,6 @@
+{
+  "name": "Society Management Platform",
+  "description": "Multi-tenant society and apartment management platform with role-based access, complaint tracking, notice boards, household management, and isolated society instances.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

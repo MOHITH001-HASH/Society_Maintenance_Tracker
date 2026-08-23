@@ -1,0 +1,162 @@
+{
+  "entities": {
+    "Society": {
+      "title": "Society",
+      "description": "An apartment or residential society complex.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "address": { "type": "string" },
+        "numberOfFloors": { "type": "number" },
+        "unitsPerFloor": { "type": "number" },
+        "totalApartments": { "type": "number" },
+        "generatedUnits": { "type": "array", "items": { "type": "string" } },
+        "adminId": { "type": "string" },
+        "adminEmail": { "type": "string" },
+        "isSetupComplete": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "address", "numberOfFloors", "totalApartments", "isSetupComplete"]
+    },
+    "User": {
+      "title": "User",
+      "description": "A user in the system, either resident or admin.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "format": "email" },
+        "role": { "type": "string", "enum": ["resident", "admin"] },
+        "name": { "type": "string" },
+        "societyId": { "type": "string" },
+        "unitNumber": { "type": "string" },
+        "residentType": { "type": "string", "enum": ["primary", "household"] },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "role", "name"]
+    },
+    "Complaint": {
+      "title": "Complaint",
+      "description": "A maintenance complaint raised by a resident.",
+      "type": "object",
+      "properties": {
+        "societyId": { "type": "string" },
+        "residentId": { "type": "string" },
+        "unitNumber": { "type": "string" },
+        "category": { "type": "string" },
+        "description": { "type": "string" },
+        "photoUrl": { "type": "string" },
+        "status": { "type": "string", "enum": ["Open", "In Progress", "Pending Resident Approval", "Resolved"] },
+        "priority": { "type": "string", "enum": ["Low", "Medium", "High", "Urgent"] },
+        "spaceType": { "type": "string", "enum": ["Private", "Public"] },
+        "preferredVisitTime": { "type": "string" },
+        "assignedStaffId": { "type": "string" },
+        "assignedStaffName": { "type": "string" },
+        "assignedStaffPhone": { "type": "string" },
+        "history": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "status": { "type": "string" },
+              "timestamp": { "type": "string", "format": "date-time" },
+              "actorId": { "type": "string" },
+              "actorName": { "type": "string" },
+              "note": { "type": "string" }
+            }
+          }
+        },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["residentId", "category", "description", "status"]
+    },
+    "Notice": {
+      "title": "Notice",
+      "description": "A notice posted by the admin.",
+      "type": "object",
+      "properties": {
+        "societyId": { "type": "string" },
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "isImportant": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "authorId": { "type": "string" }
+      },
+      "required": ["title", "content", "isImportant", "createdAt"]
+    },
+    "Staff": {
+      "title": "Staff",
+      "description": "A staff technician assigned to maintenance tasks in a society.",
+      "type": "object",
+      "properties": {
+        "societyId": { "type": "string" },
+        "name": { "type": "string" },
+        "profession": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "workingHours": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "profession", "phone", "email"]
+    },
+    "HouseholdRequest": {
+      "title": "HouseholdRequest",
+      "description": "Request to remove or modify household members.",
+      "type": "object",
+      "properties": {
+        "societyId": { "type": "string" },
+        "unitNumber": { "type": "string" },
+        "targetUserId": { "type": "string" },
+        "targetUserName": { "type": "string" },
+        "type": { "type": "string" },
+        "status": { "type": "string" },
+        "requestedBy": { "type": "string" },
+        "requestedByName": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["unitNumber", "targetUserId", "targetUserName", "type", "status"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Audit records for administrative actions.",
+      "type": "object",
+      "properties": {
+        "societyId": { "type": "string" },
+        "action": { "type": "string" },
+        "description": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["action", "description", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/societies/{societyId}": {
+      "schema": { "$ref": "#/entities/Society" },
+      "description": "Societies and complexes."
+    },
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "User profiles, roles, society membership."
+    },
+    "/complaints/{complaintId}": {
+      "schema": { "$ref": "#/entities/Complaint" },
+      "description": "Maintenance complaints scoped by society."
+    },
+    "/notices/{noticeId}": {
+      "schema": { "$ref": "#/entities/Notice" },
+      "description": "Notice board posts scoped by society."
+    },
+    "/staff/{staffId}": {
+      "schema": { "$ref": "#/entities/Staff" },
+      "description": "Staff directory scoped by society."
+    },
+    "/householdRequests/{requestId}": {
+      "schema": { "$ref": "#/entities/HouseholdRequest" },
+      "description": "Household member removal requests."
+    },
+    "/auditLogs/{logId}": {
+      "schema": { "$ref": "#/entities/AuditLog" },
+      "description": "Audit trails per society."
+    }
+  }
+}
