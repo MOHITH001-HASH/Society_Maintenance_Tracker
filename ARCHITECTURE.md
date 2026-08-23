@@ -1,272 +1,205 @@
-# High-Level Architecture & Implementation Plan
-## Global, High-Concurrency Society & Apartment Management Platform
+# Enterprise High-Concurrency Architecture Specification
+## Multi-Tenant Resident & Society Operations Platform
 
 ---
 
-### 1. Executive Summary & System Objectives
-This document defines the production-grade architectural blueprint for a multi-tenant residential management system designed for **global scalability**, **sub-100ms API response times**, and **99.999% high availability**. 
+### Executive Overview & SLO Targets
+This document specifies the enterprise architecture, distributed microservices topology, multi-region database partitioning, and infrastructure requirements for the Society Operations & Maintenance System. The target platform is engineered for global high concurrency, 99.999% availability, and sub-50ms latency at scale.
 
-The system partitions data at the tenant (`societyId`) level, isolates private resident records, processes multi-channel communications (Email/SMS OTP and broadcast notices), and offloads media assets to cloud object storage.
+| Metric | Target SLA / SLO | Architecture Solution |
+| :--- | :--- | :--- |
+| **Availability (Uptime)** | **99.999%** (< 5.26 min downtime/yr) | Active-Active Multi-Region Cloud Run / GKE with Global Anycast CDN |
+| **Peak Concurrency** | **500,000+ Concurrent Users** | Stateless horizontal pod autoscaling, Redis cluster read-through caches |
+| **P99 API Latency** | **< 45ms** | Edge-terminated TLS, localized Firestore/Spanner read replicas, Redis Cache |
+| **Data Durability** | **RPO = 0, RTO < 30s** | Distributed multi-region synchronous replication with point-in-time recovery |
+| **Media Processing** | **100% Client + Edge Offload** | In-browser Canvas WebP compression + Cloudflare R2 / GCS direct presigned upload |
 
 ---
 
-### 2. Microservices Topology & Distributed Systems Architecture
+## 1. Microservices Decomposition & Topology
 
 ```
-                                [ Global Anycast DNS / CDN Edge (Cloudflare / Cloud CDN) ]
-                                                            │
-                                        [ API Gateway / Envoy Proxy / WAF ]
-                                                            │
-                     ┌──────────────────────────────────────┼──────────────────────────────────────┐
-                     │                                      │                                      │
-          [ Auth & OTP Microservice ]           [ Tenant Management Service ]           [ Media Storage Service ]
-          - HMAC-SHA256 Tokens                  - Society & Building Matrix             - Chunked Direct-to-S3/GCS
-          - 5-Min TTL Invalidation               - Unit Mapping Engine                   - Automatic WebP Transcode
-          - Rate Limiting (Token Bucket)         - Multi-Tenant Access Guard             - Edge CDN Object Caching
-                     │                                      │                                      │
-                     └──────────────────────────────────────┼──────────────────────────────────────┘
-                                                            │
-                                              [ Notification Message Bus ]
-                                         (Cloud Pub/Sub / Kafka / RabbitMQ)
-                                                            │
-                                  ┌─────────────────────────┴─────────────────────────┐
-                                  │                                                   │
-                       [ Email Worker (SES/SendGrid) ]                      [ SMS Worker (Twilio/GCP) ]
+                               ┌────────────────────────────────┐
+                               │  Global Anycast Cloud CDN / WAF │
+                               │  (DDoS Shield + TLS 1.3 Edge)  │
+                               └───────────────┬────────────────┘
+                                               │
+                                               ▼
+                              ┌───────────────────────────────────┐
+                              │  API Gateway & Envoy Mesh Layer   │
+                              │  (Rate Limiting, JWT, RBAC Guard) │
+                              └─┬──────────────┬────────────────┬─┘
+                                │              │                │
+            ┌───────────────────┴──┐           │           ┌────┴─────────────────┐
+            ▼                      ▼           ▼           ▼                      ▼
+  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐
+  │  Authentication  │  │ Complaint & SLA  │  │ Society & Unit   │  │ Media & Asset    │  │ Notification &   │
+  │  & Identity Svc  │  │ Lifecycle Engine │  │ Directory Svc    │  │ Ingestion Svc    │  │ OTP Dispatcher   │
+  └─────────┬────────┘  └─────────┬────────┘  └─────────┬────────┘  └─────────┬────────┘  └─────────┬────────┘
+            │                     │                     │                     │                     │
+            └───────────────┬─────┴───────────────┬─────┴───────────────┬─────┴───────────────┬─────┘
+                            │                     │                     │                     │
+                            ▼                     ▼                     ▼                     ▼
+               ┌──────────────────────┐ ┌───────────────────┐ ┌───────────────────┐ ┌───────────────────┐
+               │ Multi-Region Storage │ │ Redis Enterprise  │ │ Kafka / Cloud     │ │ S3 / GCS Storage  │
+               │ (Firestore / Spanner)│ │ Cluster (L2 Cache)│ │ PubSub Event Bus  │ │ (Direct WebP/CDN) │
+               └──────────────────────┘ └───────────────────┘ └───────────────────┘ └───────────────────┘
 ```
 
-#### Core Microservices:
-1. **Identity & OTP Microservice**:
-   - Manages secure 6-digit one-time passcodes with HMAC-SHA256 salted hashing.
-   - Enforces sliding 5-minute TTL expirations and 3-attempt brute-force lockouts.
-   - Implements per-IP and per-destination rate-limiting using Token Bucket algorithms.
-2. **Multi-Tenant Society & Matrix Engine**:
-   - Manages society registrations, floor hierarchies, and unit coordinate generation.
-   - Enforces strict tenant separation ensuring no cross-society data leakage.
-3. **Complaints & SLA Lifecycle Service**:
-   - Manages maintenance workflows, technician dispatch, resident confirmation, and dynamic multi-tier SLA monitoring:
-     - **Urgent Priority**: Overdue after **10 hours** (Critical emergencies, gas/water floods, structural risks).
-     - **High Priority**: Overdue after **1 day / 24 hours** (Major appliance leaks, primary power/AC faults).
-     - **Medium Priority**: Overdue after **2 days / 48 hours** (Fixtures, carpentry, localized clogs).
-     - **Low Priority**: Overdue after **3 days / 72 hours** (Routine cosmetic maintenance, aesthetic repairs).
-   - Dynamically re-indexes and prioritizes overdue tickets to the top of administrator feeds with automated escalation alerts.
-4. **Cloud Media Storage Microservice**:
-   - Provides presigned upload URLs with MIME verification and virus scanning.
-   - Serves high-resolution photos through edge CDN nodes with client-side lightbox previews.
-5. **Notification Microservice**:
-   - Asynchronously consumes broadcast and unit-level events to dispatch multi-channel alerts (SMS, Email, Push).
+### Microservice Boundary Specifications
+
+1. **Authentication & Identity Service (`auth-service`)**:
+   - Manages OAuth 2.0 (Google Workspace / Firebase Auth tokens), session invalidation, and custom claims injection.
+   - Enforces Multi-Factor Authentication (SMS OTP with +91 international routing via Twilio/GCP Communications).
+   - Manages Role-Based Access Control (RBAC): Global Super Admin, Society Admin, Primary Resident, Household Member, and Assigned Staff.
+
+2. **Complaint & SLA Lifecycle Engine (`ticket-service`)**:
+   - Manages maintenance tickets, state machines (`Open` &rarr; `In Progress` &rarr; `Pending Resident Approval` &rarr; `Resolved`), and priority-weighted SLA timers.
+   - Implements distributed cron/event-driven workers that automatically flag breaches in real time.
+   - Computes live resolution analytics, MTTR (Mean Time to Resolution), and technician workload balancing.
+
+3. **Multi-Tenant Society & Directory Service (`tenant-service`)**:
+   - Manages hierarchical isolation: `Organization` &rarr; `Society` &rarr; `Block/Tower` &rarr; `Unit Number` &rarr; `Resident Profile`.
+   - Supports self-serve society provisioning with custom SLA matrices, emergency contacts, and automated unit generator.
+
+4. **Media & Asset Ingestion Service (`media-service`)**:
+   - Pure client-side compression pipeline (WebP/JPEG 80% lossy, max 1600px dimension) with fallback to edge serverless transformations.
+   - Direct-to-storage presigned upload tokens bypassing API server memory to guarantee zero server crash under burst traffic.
+
+5. **Notification & Invites Dispatcher (`notify-service`)**:
+   - Event-driven consumer connected to Kafka/PubSub topics (`ticket.created`, `ticket.overdue`, `resident.invited`, `profile.otp_requested`).
+   - Dispatches transactional emails (SendGrid / AWS SES) and SMS (+91 India DLT-compliant templates).
 
 ---
 
-### 3. Database Schema & Multi-Tenant Partitioning
+## 2. Database Schema & Data Modeling
 
-The database leverages composite partition keys centered around `societyId`:
+### Physical Collection / Table Design (Multi-Tenant Isolated)
 
 #### Collection: `societies`
 ```json
 {
-  "id": "soc_north_towers_01",
-  "name": "North Towers Luxury Residences",
-  "address": "450 Skyline Avenue, Tower B",
-  "numberOfFloors": 24,
-  "unitsPerFloor": 8,
-  "totalApartments": 192,
-  "generatedUnits": ["101", "102", "103", ..., "2408"],
-  "isSetupComplete": true,
-  "adminIds": ["usr_admin_01"],
+  "_id": "soc_blr_7721",
+  "name": "Palm Heights Residency",
+  "address": "Outer Ring Road, Bellandur, Bengaluru, Karnataka, 560103",
+  "countryCode": "+91",
+  "blocks": ["Tower A", "Tower B", "Tower C"],
+  "totalUnits": 360,
+  "slaMatrix": {
+    "Urgent": 6,
+    "High": 24,
+    "Medium": 48,
+    "Low": 72
+  },
+  "emergencyContacts": [
+    { "role": "Security Gate 1", "phone": "+91 98450 11223" },
+    { "role": "Facility Manager", "phone": "+91 99801 44556" }
+  ],
   "createdAt": "2026-08-23T00:00:00.000Z",
-  "updatedAt": "2026-08-23T00:00:00.000Z"
+  "status": "active"
 }
 ```
 
-#### Collection: `users`
+#### Collection: `users` (Indexed on `societyId`, `email`, `unitNumber`, `role`)
 ```json
 {
-  "id": "usr_948271",
+  "_id": "usr_991823a",
+  "societyId": "soc_blr_7721",
   "email": "resident@example.com",
-  "name": "Elena Rostova",
-  "phone": "+14155552671",
+  "name": "Mohith Paladugu",
+  "phone": "+91 98765 43210",
+  "phoneVerified": true,
   "role": "resident",
-  "societyId": "soc_north_towers_01",
-  "unitNumber": "1402",
-  "residentType": "primary", // "primary" | "household"
-  "status": "approved", // "pending" | "invited" | "approved" | "rejected" | "removed"
-  "invitedBy": "usr_primary_948",
-  "invitedByName": "Dmitri Rostova",
-  "photoURL": "/uploads/media-avatar-1402.webp",
+  "residentType": "primary",
+  "unitNumber": "A-1402",
+  "approvalStatus": "approved",
   "createdAt": "2026-08-23T00:00:00.000Z"
 }
 ```
 
-#### Collection: `householdRequests`
+#### Collection: `complaints` (Composite Indexed on `[societyId, status, priority, createdAt]`)
 ```json
 {
-  "id": "hreq_592810",
-  "societyId": "soc_north_towers_01",
-  "unitNumber": "1402",
-  "targetUserId": "usr_948271",
-  "targetUserName": "Elena Rostova",
-  "targetUserEmail": "resident@example.com",
-  "type": "addition", // "addition" | "removal"
-  "status": "pending", // "pending" | "approved" | "rejected"
-  "requestedBy": "usr_primary_948",
-  "requestedByName": "Dmitri Rostova",
-  "createdAt": "2026-08-23T00:00:00.000Z"
-}
-```
-
----
-
-### 4. Household Multi-Recipient Broadcast & RBAC Architecture
-
-#### A. Multi-Recipient Private Space Notification Topology
-When maintenance requests are initiated, updated with technician assignments, or resolved for private residential units (`spaceType === 'Private'`), the system executes a real-time tenant fan-out query:
-1. Queries all registered users where `societyId == targetSociety`, `unitNumber == targetUnit`, and `status == 'approved'`.
-2. Compiles the unique recipient email/SMS matrix encompassing both Primary Residents and all approved Household Members.
-3. Dispatches synchronous high-priority notifications, ensuring complete household visibility without cross-unit leakage.
-
-```
-[ Private Space Complaint Event ] 
-               │
-               ▼
-[ Unit Household Resolver ] ───▶ Query: (societyId = X, unitNumber = Y, status = 'approved')
-               │
-               ├───────────────────────────────────────────┐
-               ▼                                           ▼
-      [ Primary Resident ]                        [ Household Members ]
-   (Email & SMS Dispatch)                        (Email & SMS Dispatch)
-```
-
-#### B. Household Member Admin Approval State Machine
-Household members invited by primary residents require administrator approval before gaining system access:
-1. **Invited Phase**: Resident initiates invitation -> Document written with `status: 'invited'` and registered in `householdRequests` (`type: 'addition'`).
-2. **Approval Gateway**: Administrator reviews the pending household queue and confirms identity/unit eligibility -> Transitions status to `'approved'`.
-3. **Activation & Access**: The household member receives confirmation email and gains access to all resident features:
-   - Maintenance & Complaints (submit, track, confirm resolution).
-   - Society Notices (read broadcasts, view attachments).
-   - Household Directory (view registered unit members).
-   - Profile & Communication Preferences.
-4. **Primary Resident Protection**: Household members have full resident capabilities but are strictly prohibited from submitting removal requests against the Primary Resident.
-
-#### RBAC Matrix
-| Capability | Primary Resident | Approved Household Member | Pending/Invited Member | Society Admin |
-| :--- | :--- | :--- | :--- | :--- |
-| **View Notices & Attachments** | Yes | Yes | No | Yes (Create/Edit) |
-| **Submit & Track Maintenance** | Yes | Yes | No | Yes (Manage/Assign) |
-| **Receive Private Unit Alerts** | Yes | Yes | No | Yes |
-| **Confirm Issue Resolution** | Yes | Yes | No | Yes |
-| **Invite Household Member** | Yes | Yes | No | Yes |
-| **Remove Household Member** | Yes | Yes | No | Yes (Approve) |
-| **Remove Primary Resident** | Yes (Self-transfer) | **Prohibited** | No | Yes |
-
----
-
-### 5. Indexing & Query Optimization Strategy
-
-1. **Complaints Index**: `(societyId ASC, unitNumber ASC, createdAt DESC)` — For resident unit feeds.
-2. **Admin Complaints Index**: `(societyId ASC, status ASC, priority DESC, createdAt DESC)` — For admin triaging.
-3. **Notices Index**: `(societyId ASC, createdAt DESC)` — For sub-10ms notice board broadcasts.
-4. **Directory Index**: `(societyId ASC, unitNumber ASC, status ASC)` — For household management.
-5. **Pending Approvals Index**: `(societyId ASC, status ASC, role ASC)` — For real-time admin approval queue.
-
----
-
-### 6. High-Concurrency & Infrastructure Requirements
-
-| Metric / Layer | Specification | Implementation Tooling |
-| :--- | :--- | :--- |
-| **Global CDN & WAF** | Anycast Routing, DDoS Layer 7 Shield | Cloudflare Enterprise / Google Cloud Armor |
-| **Compute Clusters** | Stateless Autoscaling Containers | Google Cloud Run / Kubernetes GKE Autopilot |
-| **Database Engine** | Multi-Region Active Replication | Cloud Firestore / Google Cloud Spanner |
-| **Distributed Caching**| Sub-millisecond Session & Rate Limiter | Managed Redis Cluster / Cloud Memorystore |
-| **Object Media Store** | Multi-Zone Replicated Buckets | Google Cloud Storage / AWS S3 with CDN Edge |
-| **Target Availability**| 99.999% SLA (< 5.26 minutes annual downtime) | Multi-Region Failover & Automated Health Probes |
-
----
-
-### 7. Implementation Rollout Phases
-
-- **Phase 1 (Completed)**: Multi-tenant UI isolation, Default Notices screen routing, Profile contact management, and Onboarding setup wizard.
-- **Phase 2 (Completed)**: Persistent OTP microservice with rate limiting, Cloud Object Storage for Media with progress indicators, Image Lightbox viewer, and priority SLA monitoring (Urgent: 10h, High: 24h, Medium: 48h, Low: 72h).
-- **Phase 3 (Completed)**: Household multi-recipient broadcast notifications, Administrator Approval Gateway for invited household members, and Primary Resident removal protection.
-- **Phase 4 (Enterprise Scale)**: Multi-region Redis cluster migration, Webhook integrations for automated payment gateways, and automated IoT access gate controllers.
-```json
-{
-  "id": "cmp_847192",
-  "societyId": "soc_north_towers_01",
-  "residentId": "usr_948271",
-  "unitNumber": "1402",
+  "_id": "cmp_8823491",
+  "societyId": "soc_blr_7721",
+  "userId": "usr_991823a",
+  "userName": "Mohith Paladugu",
+  "unitNumber": "A-1402",
   "category": "Plumbing",
-  "description": "Main water pressure valve leaking under sink.",
-  "spaceType": "Private", // "Private" | "Public"
-  "preferredVisitTime": "Weekdays after 4:00 PM",
-  "photoUrl": "/uploads/media-photo-pipe.webp",
-  "status": "In Progress", // "Open" | "In Progress" | "Pending Resident Approval" | "Resolved"
-  "priority": "High", // "Low" | "Medium" | "High" | "Urgent"
-  "assignedStaffId": "stf_8821",
-  "assignedStaffName": "Carlos Mendoza",
-  "assignedStaffPhone": "+14155559012",
-  "assignedStaffWorkingHours": "8:00 AM - 5:00 PM",
+  "spaceType": "Private",
+  "priority": "Urgent",
+  "description": "Main water valve pipe leakage under master sink.",
+  "photoUrl": "https://storage.cloud.google.com/soc-assets/cmp_8823491.webp",
+  "status": "In Progress",
+  "preferredVisitTime": "Morning (9am - 12pm)",
+  "assignedStaffId": "stf_441",
+  "assignedStaffName": "Ramesh Kumar (Plumber)",
+  "assignedStaffPhone": "+91 98450 99881",
+  "createdAt": "2026-08-23T06:30:00.000Z",
   "history": [
     {
+      "actorId": "usr_991823a",
+      "actorName": "Mohith Paladugu",
+      "actorRole": "resident",
       "status": "Open",
-      "timestamp": "2026-08-23T01:00:00.000Z",
-      "actorId": "usr_948271",
-      "actorName": "Elena Rostova",
-      "note": "Complaint submitted with photo attachment"
+      "timestamp": "2026-08-23T06:30:00.000Z"
     },
     {
-      "status": "In Progress",
-      "timestamp": "2026-08-23T02:15:00.000Z",
-      "actorId": "usr_admin_01",
+      "actorId": "adm_110",
       "actorName": "Society Admin",
-      "note": "Assigned technician Carlos Mendoza (Plumbing)"
+      "actorRole": "admin",
+      "status": "In Progress",
+      "note": "Assigned to Ramesh Kumar with high priority.",
+      "timestamp": "2026-08-23T07:15:00.000Z"
     }
-  ],
-  "createdAt": "2026-08-23T01:00:00.000Z",
-  "updatedAt": "2026-08-23T02:15:00.000Z"
+  ]
 }
 ```
 
-#### Collection: `notices`
+#### Collection: `auditLogs` (Immutable Append-Only Ledger)
 ```json
 {
-  "id": "not_109283",
-  "societyId": "soc_north_towers_01",
-  "title": "Emergency Generator Testing Notice",
-  "content": "Generator testing scheduled for Tuesday 10:00 AM - 12:00 PM. Elevators 1 & 2 will remain active.",
-  "imageUrl": "/uploads/media-generator-notice.webp",
-  "isImportant": true,
-  "authorId": "usr_admin_01",
-  "createdAt": "2026-08-23T03:00:00.000Z"
+  "_id": "log_551923",
+  "societyId": "soc_blr_7721",
+  "actorId": "adm_110",
+  "actorName": "Society Admin",
+  "actorRole": "admin",
+  "category": "maintenance",
+  "action": "Complaint Status Modified",
+  "targetId": "cmp_8823491",
+  "description": "Status moved to In Progress. Technician assigned.",
+  "timestamp": "2026-08-23T07:15:00.000Z"
 }
 ```
 
 ---
 
-### 4. Indexing & Query Optimization Strategy
+## 3. Infrastructure & Maximum Uptime Strategy
 
-1. **Complaints Index**: `(societyId ASC, unitNumber ASC, createdAt DESC)` — For resident unit feeds.
-2. **Admin Complaints Index**: `(societyId ASC, status ASC, priority DESC, createdAt DESC)` — For admin triaging.
-3. **Notices Index**: `(societyId ASC, createdAt DESC)` — For sub-10ms notice board broadcasts.
-4. **Directory Index**: `(societyId ASC, unitNumber ASC, status ASC)` — For household management.
+### High-Availability Deployment Matrix
 
----
-
-### 5. High-Concurrency & Infrastructure Requirements
-
-| Metric / Layer | Specification | Implementation Tooling |
+| Infrastructure Layer | Technology | Redundancy & Failover Spec |
 | :--- | :--- | :--- |
-| **Global CDN & WAF** | Anycast Routing, DDoS Layer 7 Shield | Cloudflare Enterprise / Google Cloud Armor |
-| **Compute Clusters** | Stateless Autoscaling Containers | Google Cloud Run / Kubernetes GKE Autopilot |
-| **Database Engine** | Multi-Region Active Replication | Cloud Firestore / Google Cloud Spanner |
-| **Distributed Caching**| Sub-millisecond Session & Rate Limiter | Managed Redis Cluster / Cloud Memorystore |
-| **Object Media Store** | Multi-Zone Replicated Buckets | Google Cloud Storage / AWS S3 with CDN Edge |
-| **Target Availability**| 99.999% SLA (< 5.26 minutes annual downtime) | Multi-Region Failover & Automated Health Probes |
+| **Edge CDN & WAF** | Cloudflare Enterprise / Cloud Armor | Anycast routing across 300+ PoPs with automated DDoS layer 3/4/7 mitigation |
+| **Compute Cluster** | Kubernetes (GKE / EKS) Multi-Zone | Horizontal Pod Autoscaler (HPA) targeting 60% CPU/Memory with node-pool multi-AZ spread |
+| **Primary Database** | Google Cloud Firestore / Spanner | Multi-region 5-replica consensus across 3 geographical cloud regions |
+| **L2 Caching** | Redis Cluster (Memorystore / ElastiCache) | Active-Active cross-region read replicas with Sub-millisecond latency |
+| **Event Broker** | Apache Kafka / Google Cloud Pub/Sub | At-least-once guaranteed delivery, partitioned by `societyId` |
+| **Static Assets** | Google Cloud Storage / Cloudflare R2 | Direct browser WebP pipeline + immutable cache headers (`Cache-Control: max-age=31536000`) |
 
 ---
 
-### 6. Implementation Rollout Phases
+## 4. Scalability Implementation Plan & Milestones
 
-- **Phase 1 (Completed)**: Multi-tenant UI isolation, Default Notices screen routing, Profile contact management, and Onboarding setup wizard.
-- **Phase 2 (Completed)**: Persistent OTP microservice with rate limiting, Cloud Object Storage for Media with progress indicators, Image Lightbox viewer, and cursor pagination.
-- **Phase 3 (Enterprise Scale)**: Multi-region Redis cluster migration, Webhook integrations for automated payment gateways, and automated IoT access gate controllers.
+### Phase 1: Client-Side Resilience & Offload (Completed)
+- Client-side Canvas image optimization to zero out serverless payload limits.
+- Resilient OTP engine with native India (+91) validation.
+- Clean isolation of Admin/Resident Demo Sandbox modes.
+
+### Phase 2: High-Volume Asynchronous Workers (Immediate)
+- SLA monitor cron execution via Cloud Scheduler + Cloud Run Worker triggering real-time alerts upon 80% SLA consumption.
+- DLT-compliant SMS Gateway webhook integration for automated resident invitation delivery.
+
+### Phase 3: Global Geo-Partitioning & Read Caches
+- Automatic read caching for global notice boards and directory lookups via Redis.
+- Society data sharding allowing horizontal scaling to 10,000+ residential societies and 5,000,000+ residents concurrently.

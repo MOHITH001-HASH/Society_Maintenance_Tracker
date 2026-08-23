@@ -1,5 +1,6 @@
 import { useState, useEffect, FormEvent } from "react";
-import { ShieldCheck, RefreshCw, X, CheckCircle2, AlertCircle } from "lucide-react";
+import { ShieldCheck, RefreshCw, X, CheckCircle2, AlertCircle, Copy } from "lucide-react";
+import { sendOtpCode, verifyOtpCode } from "../lib/otpService";
 
 interface OtpModalProps {
   isOpen: boolean;
@@ -51,18 +52,13 @@ export default function OtpModal({
     setError("");
     setLoading(true);
     try {
-      const res = await fetch("/api/otp/send", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ contact, type })
-      });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        if (data._devCode) {
-          setDevCode(data._devCode);
+      const res = await sendOtpCode(contact, type);
+      if (res.success) {
+        if (res.code) {
+          setDevCode(res.code);
         }
       } else {
-        setError(data.error || "Failed to send OTP code.");
+        setError(res.message || "Failed to send OTP code.");
       }
     } catch (err: any) {
       setError("Network error sending OTP. Please retry.");
@@ -81,19 +77,14 @@ export default function OtpModal({
     setError("");
     setLoading(true);
     try {
-      const res = await fetch("/api/otp/verify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ contact, code })
-      });
-      const data = await res.json();
-      if (res.ok && data.success) {
+      const res = await verifyOtpCode(contact, code);
+      if (res.success) {
         setSuccess(true);
         setTimeout(() => {
           onVerified();
         }, 600);
       } else {
-        setError(data.error || "Invalid or expired OTP code.");
+        setError(res.error || "Invalid or expired OTP code.");
       }
     } catch (err: any) {
       setError("Verification service unreachable.");
@@ -134,14 +125,14 @@ export default function OtpModal({
           <div className="mb-4 p-2.5 bg-blue-50 border border-blue-200 rounded-xl flex items-center justify-between text-xs">
             <div className="flex items-center text-blue-800 font-semibold">
               <span className="mr-1.5">🔑</span>
-              <span>Dev OTP: <strong className="font-mono tracking-wider">{devCode}</strong></span>
+              <span>Code: <strong className="font-mono tracking-wider text-sm">{devCode}</strong></span>
             </div>
             <button
               type="button"
               onClick={() => {
                 setCode(devCode);
               }}
-              className="text-[11px] font-bold text-blue-700 bg-blue-100 hover:bg-blue-200 px-2 py-0.5 rounded"
+              className="text-[11px] font-bold text-blue-700 bg-blue-100 hover:bg-blue-200 px-2 py-0.5 rounded cursor-pointer transition"
             >
               Auto Fill
             </button>
@@ -182,7 +173,7 @@ export default function OtpModal({
             <button
               type="submit"
               disabled={loading || code.length < 6}
-              className="w-full py-3 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold rounded-xl shadow-xs transition"
+              className="w-full py-3 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold rounded-xl shadow-xs transition cursor-pointer"
             >
               {loading ? "Verifying..." : "Verify & Continue"}
             </button>
@@ -198,7 +189,7 @@ export default function OtpModal({
                     setResendTimer(60);
                     sendOtp();
                   }}
-                  className="font-bold text-blue-600 hover:text-blue-800 flex items-center"
+                  className="font-bold text-blue-600 hover:text-blue-800 flex items-center cursor-pointer"
                 >
                   <RefreshCw className="w-3 h-3 mr-1" /> Resend Code
                 </button>

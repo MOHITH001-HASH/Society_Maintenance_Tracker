@@ -1,6 +1,6 @@
 import { useState, useEffect, FormEvent, ChangeEvent } from "react";
 import { collection, query, where, onSnapshot, addDoc, orderBy, doc, updateDoc, limit, getDocs, deleteDoc } from "firebase/firestore";
-import { LogOut, Plus, Image as ImageIcon, Users, AlertCircle, Camera, Mail, User as UserIcon, Building2, Bell, Megaphone, CheckCircle2, Clock, Trash2, ZoomIn, ShieldAlert, Hourglass, XCircle, ShieldCheck, Filter, History } from "lucide-react";
+import { LogOut, Plus, Image as ImageIcon, Users, AlertCircle, Camera, Mail, User as UserIcon, Building2, Bell, Megaphone, CheckCircle2, Clock, Trash2, ZoomIn, ShieldAlert, Hourglass, XCircle, ShieldCheck, Filter, History, Sparkles } from "lucide-react";
 import { auth, db } from "../lib/firebase";
 import { useAuth } from "../contexts/AuthContext";
 import { Complaint, Notice, Society, User, HouseholdRequest } from "../types";
@@ -35,6 +35,7 @@ export default function ResidentDashboard() {
   const [showAddMember, setShowAddMember] = useState(false);
   const [newMemberEmail, setNewMemberEmail] = useState("");
   const [newMemberName, setNewMemberName] = useState("");
+  const [showDemoModal, setShowDemoModal] = useState(false);
   
   // Cloud Media Upload & Lightbox state
   const [uploadingImage, setUploadingImage] = useState(false);
@@ -601,14 +602,16 @@ export default function ResidentDashboard() {
               <button onClick={() => setActiveTab('profile')} className={`px-3 py-1 text-xs font-bold rounded-lg ${activeTab === 'profile' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'}`}>Profile</button>
             </div>
             
-            {/* Quick Testing Switcher */}
-            <button
-                onClick={() => updateDoc(doc(db, "users", user!.uid), { role: "admin" })}
-                className="bg-purple-50 text-purple-700 border border-purple-200 px-3.5 py-1.5 rounded-lg text-xs font-bold hover:bg-purple-100 transition shadow-2xs self-start sm:self-auto"
-                title="Switch to Admin workspace for testing"
-            >
-                Switch to Admin Mode
-            </button>
+            {/* Discrete Demo Sandbox Access */}
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={() => setShowDemoModal(true)}
+                className="inline-flex items-center text-slate-500 hover:text-slate-800 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg text-xs font-bold transition shadow-2xs cursor-pointer"
+                title="Demo Sandbox & Testing Tools"
+              >
+                <Sparkles className="w-3.5 h-3.5 mr-1 text-amber-500" /> Demo
+              </button>
+            </div>
         </div>
         
         {/* Main View Body */}
@@ -1217,6 +1220,43 @@ export default function ResidentDashboard() {
           )}
         </main>
       </div>
+
+      {/* Demo Modal (Only visible when user explicitly clicks Demo) */}
+      {showDemoModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 border border-slate-100 relative animate-in fade-in zoom-in-95">
+            <h3 className="text-base font-black text-slate-900 mb-1 flex items-center">
+              <Sparkles className="w-4 h-4 text-amber-500 mr-1.5" /> Demo Sandbox Options
+            </h3>
+            <p className="text-xs text-slate-500 mb-4">
+              Quickly switch workspace perspective or test administrative workflows.
+            </p>
+            <div className="space-y-2.5">
+              <button
+                onClick={async () => {
+                  if (user?.uid) {
+                    await updateDoc(doc(db, "users", user.uid), { role: "admin" });
+                    setShowDemoModal(false);
+                  }
+                }}
+                className="w-full text-left p-3 rounded-xl border border-slate-200 hover:border-purple-500 hover:bg-purple-50/50 transition flex items-center justify-between group cursor-pointer"
+              >
+                <div>
+                  <h4 className="text-xs font-bold text-slate-900 group-hover:text-purple-700">Switch to Society Admin</h4>
+                  <p className="text-[11px] text-slate-500">Access administrator console, manage staff, SLAs, and notices</p>
+                </div>
+                <span className="text-xs font-bold text-purple-600">Switch &rarr;</span>
+              </button>
+            </div>
+            <button
+              onClick={() => setShowDemoModal(false)}
+              className="mt-4 w-full py-2 bg-slate-100 text-slate-700 hover:bg-slate-200 text-xs font-bold rounded-lg transition cursor-pointer"
+            >
+              Close Demo
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Lightbox Modal */}
       <ImageLightboxModal

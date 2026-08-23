@@ -164,17 +164,20 @@ export default function ProfileEditor({ userProfile }: ProfileEditorProps) {
             </div>
 
             <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1">Mobile Phone Number</label>
+              <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1">Mobile Phone Number (India +91)</label>
               <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
-                  <Phone className="w-4 h-4" />
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-500 font-bold text-xs">
+                  🇮🇳 +91
                 </div>
                 <input
                   type="tel"
-                  value={phone}
-                  onChange={e => setPhone(e.target.value)}
-                  placeholder="+1 (555) 000-0000"
-                  className="pl-9 w-full rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold focus:outline-hidden focus:ring-1 focus:ring-blue-500"
+                  value={phone.replace(/^\+91\s*/, '')}
+                  onChange={e => {
+                    const val = e.target.value.replace(/[^\d\s]/g, '');
+                    setPhone(val ? `+91 ${val}` : '');
+                  }}
+                  placeholder="98765 43210"
+                  className="pl-16 w-full rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold focus:outline-hidden focus:ring-1 focus:ring-blue-500"
                 />
               </div>
               {hasPhoneChanged && (

@@ -4,7 +4,7 @@ import { signInWithPopup, GoogleAuthProvider, signInAnonymously } from "firebase
 import { doc, setDoc, getDoc, collection, query, where, getDocs, deleteDoc, updateDoc, onSnapshot, addDoc } from "firebase/firestore";
 import { auth, db } from "../lib/firebase";
 import { Society } from "../types";
-import { Building2, Plus, Users, ShieldCheck, MapPin, Mail, Phone, KeyRound } from "lucide-react";
+import { Building2, Plus, Users, ShieldCheck, MapPin, Mail, Phone, KeyRound, Sparkles, Check } from "lucide-react";
 import SocietyOnboardingModal from "../components/SocietyOnboardingModal";
 import OtpModal from "../components/OtpModal";
 
@@ -24,6 +24,9 @@ export default function Login() {
   const [showOtpModal, setShowOtpModal] = useState(false);
   const [otpName, setOtpName] = useState("");
   
+  // Demo Mode Sandbox Modal
+  const [showDemoModal, setShowDemoModal] = useState(false);
+
   // Quick Society Creation Modal for new admins
   const [showCreateSocietyModal, setShowCreateSocietyModal] = useState(false);
   
@@ -60,7 +63,7 @@ export default function Login() {
       }
     }
     if (!otpContact.trim()) {
-      setError(`Please enter your ${otpContactType === 'email' ? 'email address' : 'mobile phone number'}.`);
+      setError(`Please enter your ${otpContactType === 'email' ? 'email address' : 'Indian mobile number (+91)'}.`);
       return;
     }
     setError("");
@@ -73,24 +76,58 @@ export default function Login() {
       // Sign in anonymously to obtain a valid Firebase Auth session
       const userCred = await signInAnonymously(auth);
       const uid = userCred.user.uid;
-      const contactVal = otpContact.trim().toLowerCase();
+      const rawContact = otpContact.trim();
+      let contactVal = rawContact.toLowerCase();
+      
+      // If mobile, ensure formatted India +91 number
+      if (otpContactType === "sms") {
+        const cleaned = rawContact.replace(/[^\d+]/g, "");
+        if (cleaned.startsWith("+91")) {
+          contactVal = cleaned;
+        } else if (cleaned.length === 10) {
+          contactVal = `+91 ${cleaned.slice(0, 5)} ${cleaned.slice(5)}`;
+        } else {
+          contactVal = `+91 ${cleaned}`;
+        }
+      }
+
+      // Check if this contact matches an existing user or pending invitation
+      const q = query(
+        collection(db, "users"), 
+        where(otpContactType === "email" ? "email" : "phone", "==", contactVal)
+      );
+      const querySnapshot = await getDocs(q);
+      let existingData: any = null;
+      let existingDocId: string | null = null;
+      if (!querySnapshot.empty) {
+        const docToCopy = querySnapshot.docs[0];
+        existingData = docToCopy.data();
+        existingDocId = docToCopy.id;
+      }
       
       const userDoc = await getDoc(doc(db, "users", uid));
       if (!userDoc.exists()) {
         const isHousehold = role === "resident" && residentType === "household";
-        const initialStatus = isHousehold ? "pending" : "approved";
+        let initialStatus = existingData?.status || (isHousehold ? "pending" : "approved");
 
         await setDoc(doc(db, "users", uid), {
-          email: otpContactType === "email" ? contactVal : `${uid.slice(0, 6)}@society.internal`,
-          phone: otpContactType === "sms" ? contactVal : "",
-          name: otpName.trim() || (otpContactType === "email" ? contactVal.split("@")[0] : `Resident ${unitNumber}`),
-          role: role,
-          societyId: selectedSocietyId || null,
-          unitNumber: role === "resident" ? unitNumber : null,
-          residentType: role === "resident" ? residentType : null,
+          email: otpContactType === "email" ? contactVal : (existingData?.email || `${uid.slice(0, 6)}@society.internal`),
+          phone: otpContactType === "sms" ? contactVal : (existingData?.phone || ""),
+          name: otpName.trim() || existingData?.name || (otpContactType === "email" ? contactVal.split("@")[0] : `Resident ${unitNumber || existingData?.unitNumber || ''}`),
+          role: existingData?.role || role,
+          societyId: existingData?.societyId || selectedSocietyId || null,
+          unitNumber: existingData?.unitNumber || (role === "resident" ? unitNumber : null),
+          residentType: existingData?.residentType || (role === "resident" ? residentType : null),
           status: initialStatus,
-          createdAt: new Date().toISOString()
+          invitedBy: existingData?.invitedBy || null,
+          invitedByName: existingData?.invitedByName || null,
+          createdAt: existingData?.createdAt || new Date().toISOString()
         });
+
+        // Delete orphan invitation doc if separate
+        if (existingDocId && existingDocId !== uid) {
+          await deleteDoc(doc(db, "users", existingDocId));
+        }
       }
 
       navigate("/");
@@ -145,8 +182,8 @@ export default function Login() {
         }
 
         const assignedSocietyId = existingData?.societyId || (role === "resident" ? selectedSocietyId : (selectedSocietyId || null));
-
         const newUserName = userCred.user.displayName || existingData?.name || "New User";
+        
         // Create new user profile linked to real UID
         await setDoc(doc(db, "users", userCred.user.uid), {
           email: emailLowerCase,
@@ -181,7 +218,7 @@ export default function Login() {
         }
 
         // Delete the orphan invitation document
-        if (existingDocId) {
+        if (existingDocId && existingDocId !== userCred.user.uid) {
           await deleteDoc(doc(db, "users", existingDocId));
         }
       } else {
@@ -189,7 +226,6 @@ export default function Login() {
         const existingData = userDoc.data();
         const updates: any = {};
         
-        // If user changed role or updated society
         if (role !== existingData.role) {
           updates.role = role;
         }
@@ -209,6 +245,31 @@ export default function Login() {
     } catch (err: any) {
       console.error(err);
       setError(err.message || "Failed to sign in with Google");
+    }
+  };
+
+  // Quick Demo Access Login
+  const handleQuickDemoLogin = async (demoRole: "resident" | "admin") => {
+    try {
+      const userCred = await signInAnonymously(auth);
+      const uid = userCred.user.uid;
+      const targetSocId = societies.length > 0 ? societies[0].id : "demo-society";
+      
+      await setDoc(doc(db, "users", uid), {
+        email: `${demoRole}-${uid.slice(0, 5)}@society.demo`,
+        name: demoRole === "admin" ? "Demo Administrator" : "Demo Resident",
+        role: demoRole,
+        societyId: targetSocId,
+        unitNumber: demoRole === "resident" ? "101" : null,
+        residentType: demoRole === "resident" ? "primary" : null,
+        status: "approved",
+        createdAt: new Date().toISOString()
+      });
+
+      setShowDemoModal(false);
+      navigate("/");
+    } catch (err: any) {
+      setError(err.message || "Demo login failed");
     }
   };
 
@@ -248,7 +309,7 @@ export default function Login() {
               <button
                 type="button"
                 onClick={() => setRole("resident")}
-                className={`py-2 px-3 rounded-lg text-xs font-bold transition-all ${
+                className={`py-2 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                   role === "resident"
                     ? "bg-blue-600 text-white shadow-xs"
                     : "bg-white text-slate-700 border border-slate-200 hover:bg-slate-100"
@@ -259,7 +320,7 @@ export default function Login() {
               <button
                 type="button"
                 onClick={() => setRole("admin")}
-                className={`py-2 px-3 rounded-lg text-xs font-bold transition-all ${
+                className={`py-2 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                   role === "admin"
                     ? "bg-slate-900 text-white shadow-xs"
                     : "bg-white text-slate-700 border border-slate-200 hover:bg-slate-100"
@@ -280,7 +341,7 @@ export default function Login() {
                 <button
                   type="button"
                   onClick={() => setShowCreateSocietyModal(true)}
-                  className="text-xs text-blue-600 hover:text-blue-800 font-bold flex items-center"
+                  className="text-xs text-blue-600 hover:text-blue-800 font-bold flex items-center cursor-pointer"
                 >
                   <Plus className="w-3 h-3 mr-0.5" /> New Society
                 </button>
@@ -296,7 +357,7 @@ export default function Login() {
                   setSelectedSocietyId(e.target.value);
                   setUnitNumber(""); // reset unit selection
                 }}
-                className="block w-full rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-900 bg-white shadow-2xs focus:border-blue-500 focus:outline-hidden focus:ring-1 focus:ring-blue-500"
+                className="block w-full rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-900 bg-white shadow-2xs focus:border-blue-500 focus:outline-hidden focus:ring-1 focus:ring-blue-500 cursor-pointer"
               >
                 <option value="">Choose Society / Complex...</option>
                 {societies.map((soc) => (
@@ -312,7 +373,7 @@ export default function Login() {
                   <button
                     type="button"
                     onClick={() => setShowCreateSocietyModal(true)}
-                    className="block mt-1 font-bold text-blue-600 underline"
+                    className="block mt-1 font-bold text-blue-600 underline cursor-pointer"
                   >
                     Click here to create your apartment complex now!
                   </button>
@@ -341,7 +402,7 @@ export default function Login() {
                     required
                     value={unitNumber}
                     onChange={(e) => setUnitNumber(e.target.value)}
-                    className="block w-full rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-900 bg-white shadow-2xs focus:border-blue-500 focus:outline-hidden focus:ring-1 focus:ring-blue-500"
+                    className="block w-full rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-900 bg-white shadow-2xs focus:border-blue-500 focus:outline-hidden focus:ring-1 focus:ring-blue-500 cursor-pointer"
                   >
                     <option value="">Select your Apartment Unit...</option>
                     {selectedSociety.generatedUnits.map((unit) => (
@@ -370,7 +431,7 @@ export default function Login() {
                   <button
                     type="button"
                     onClick={() => setResidentType("primary")}
-                    className={`py-2 px-2.5 rounded-lg text-xs font-bold transition-all ${
+                    className={`py-2 px-2.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                       residentType === "primary"
                         ? "bg-slate-900 text-white shadow-xs"
                         : "bg-white text-slate-700 border border-slate-200 hover:bg-slate-100"
@@ -381,7 +442,7 @@ export default function Login() {
                   <button
                     type="button"
                     onClick={() => setResidentType("household")}
-                    className={`py-2 px-2.5 rounded-lg text-xs font-bold transition-all ${
+                    className={`py-2 px-2.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                       residentType === "household"
                         ? "bg-slate-900 text-white shadow-xs"
                         : "bg-white text-slate-700 border border-slate-200 hover:bg-slate-100"
@@ -405,7 +466,7 @@ export default function Login() {
           <button
             type="button"
             onClick={() => setAuthMethod("google")}
-            className={`flex-1 py-2 text-xs font-bold border-b-2 transition ${
+            className={`flex-1 py-2 text-xs font-bold border-b-2 transition cursor-pointer ${
               authMethod === "google"
                 ? "border-blue-600 text-blue-600"
                 : "border-transparent text-slate-400 hover:text-slate-700"
@@ -416,20 +477,20 @@ export default function Login() {
           <button
             type="button"
             onClick={() => setAuthMethod("otp")}
-            className={`flex-1 py-2 text-xs font-bold border-b-2 transition flex items-center justify-center ${
+            className={`flex-1 py-2 text-xs font-bold border-b-2 transition flex items-center justify-center cursor-pointer ${
               authMethod === "otp"
                 ? "border-blue-600 text-blue-600"
                 : "border-transparent text-slate-400 hover:text-slate-700"
             }`}
           >
-            <KeyRound className="w-3.5 h-3.5 mr-1" /> OTP Microservice
+            <KeyRound className="w-3.5 h-3.5 mr-1" /> OTP Verification
           </button>
         </div>
 
         {authMethod === "google" ? (
           <button
             onClick={handleGoogleSignIn}
-            className="w-full flex justify-center items-center bg-white border border-slate-300 text-slate-800 rounded-xl py-3 px-4 hover:bg-slate-50 focus:outline-hidden focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all font-bold text-xs shadow-xs"
+            className="w-full flex justify-center items-center bg-white border border-slate-300 text-slate-800 rounded-xl py-3 px-4 hover:bg-slate-50 focus:outline-hidden focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all font-bold text-xs shadow-xs cursor-pointer"
           >
             <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google logo" className="w-4 h-4 mr-2" />
             Continue with Google Account
@@ -440,7 +501,7 @@ export default function Login() {
               <button
                 type="button"
                 onClick={() => setOtpContactType("email")}
-                className={`flex-1 py-1.5 text-xs font-bold rounded-lg border transition ${
+                className={`flex-1 py-1.5 text-xs font-bold rounded-lg border transition cursor-pointer ${
                   otpContactType === "email"
                     ? "bg-blue-50 border-blue-300 text-blue-700"
                     : "bg-white border-slate-200 text-slate-600"
@@ -451,13 +512,13 @@ export default function Login() {
               <button
                 type="button"
                 onClick={() => setOtpContactType("sms")}
-                className={`flex-1 py-1.5 text-xs font-bold rounded-lg border transition ${
+                className={`flex-1 py-1.5 text-xs font-bold rounded-lg border transition cursor-pointer ${
                   otpContactType === "sms"
                     ? "bg-blue-50 border-blue-300 text-blue-700"
                     : "bg-white border-slate-200 text-slate-600"
                 }`}
               >
-                <Phone className="w-3.5 h-3.5 inline mr-1" /> SMS OTP
+                <Phone className="w-3.5 h-3.5 inline mr-1" /> SMS OTP (+91)
               </button>
             </div>
 
@@ -476,32 +537,88 @@ export default function Login() {
 
             <div>
               <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-700 mb-1">
-                {otpContactType === "email" ? "Email Address" : "Mobile Phone Number"}
+                {otpContactType === "email" ? "Email Address" : "Mobile Phone Number (India +91)"}
               </label>
-              <input
-                type={otpContactType === "email" ? "email" : "tel"}
-                value={otpContact}
-                onChange={(e) => setOtpContact(e.target.value)}
-                placeholder={otpContactType === "email" ? "user@example.com" : "+1 (555) 123-4567"}
-                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 focus:outline-hidden focus:ring-1 focus:ring-blue-500"
-              />
+              <div className="relative">
+                {otpContactType === "sms" && (
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-500 font-bold text-xs">
+                    🇮🇳 +91
+                  </div>
+                )}
+                <input
+                  type={otpContactType === "email" ? "email" : "tel"}
+                  value={otpContact}
+                  onChange={(e) => setOtpContact(e.target.value)}
+                  placeholder={otpContactType === "email" ? "user@example.com" : "98765 43210"}
+                  className={`w-full px-3 py-2 text-xs rounded-lg border border-slate-300 focus:outline-hidden focus:ring-1 focus:ring-blue-500 ${otpContactType === "sms" ? "pl-16" : ""}`}
+                />
+              </div>
             </div>
 
             <button
               onClick={handleStartOtpFlow}
-              className="w-full flex justify-center items-center bg-blue-600 text-white rounded-xl py-3 px-4 hover:bg-blue-700 focus:outline-hidden focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all font-bold text-xs shadow-xs"
+              className="w-full flex justify-center items-center bg-blue-600 text-white rounded-xl py-3 px-4 hover:bg-blue-700 focus:outline-hidden focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all font-bold text-xs shadow-xs cursor-pointer"
             >
               <KeyRound className="w-4 h-4 mr-2" /> Send One-Time Password
             </button>
           </div>
         )}
 
-        <div className="mt-4 pt-4 border-t border-slate-100 text-center">
-          <p className="text-[11px] text-slate-400">
-            Real OTP verification microservice & multi-tenant isolation.
-          </p>
+        {/* Subtle Sandbox / Demo Trigger */}
+        <div className="mt-5 pt-4 border-t border-slate-100 flex items-center justify-between">
+          <span className="text-[11px] text-slate-400">Enterprise Tenant Security</span>
+          <button
+            type="button"
+            onClick={() => setShowDemoModal(true)}
+            className="text-[11px] font-bold text-slate-500 hover:text-blue-600 transition flex items-center cursor-pointer"
+          >
+            <Sparkles className="w-3 h-3 mr-1 text-amber-500" /> Demo Sandbox
+          </button>
         </div>
       </div>
+
+      {/* Demo Modal (Only visible when user clicks Demo Sandbox) */}
+      {showDemoModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 border border-slate-100 relative animate-in fade-in zoom-in-95">
+            <h3 className="text-base font-black text-slate-900 mb-1 flex items-center">
+              <Sparkles className="w-4 h-4 text-amber-500 mr-1.5" /> Demo Sandbox Mode
+            </h3>
+            <p className="text-xs text-slate-500 mb-4">
+              Instantly explore the application with pre-configured demo credentials without requiring real authentication.
+            </p>
+            <div className="space-y-2.5">
+              <button
+                onClick={() => handleQuickDemoLogin("admin")}
+                className="w-full text-left p-3 rounded-xl border border-slate-200 hover:border-blue-500 hover:bg-blue-50/50 transition flex items-center justify-between group"
+              >
+                <div>
+                  <h4 className="text-xs font-bold text-slate-900 group-hover:text-blue-600">Enter as Society Administrator</h4>
+                  <p className="text-[11px] text-slate-500">Access complaint SLAs, directory approvals, and broadcasts</p>
+                </div>
+                <span className="text-xs font-bold text-blue-600">Launch &rarr;</span>
+              </button>
+
+              <button
+                onClick={() => handleQuickDemoLogin("resident")}
+                className="w-full text-left p-3 rounded-xl border border-slate-200 hover:border-blue-500 hover:bg-blue-50/50 transition flex items-center justify-between group"
+              >
+                <div>
+                  <h4 className="text-xs font-bold text-slate-900 group-hover:text-blue-600">Enter as Resident (Unit 101)</h4>
+                  <p className="text-[11px] text-slate-500">Submit maintenance requests and invite household members</p>
+                </div>
+                <span className="text-xs font-bold text-blue-600">Launch &rarr;</span>
+              </button>
+            </div>
+            <button
+              onClick={() => setShowDemoModal(false)}
+              className="mt-4 w-full py-2 bg-slate-100 text-slate-700 hover:bg-slate-200 text-xs font-bold rounded-lg transition"
+            >
+              Close Demo
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* OTP Verification Modal */}
       <OtpModal
