@@ -10,7 +10,13 @@ uploads
 *.patch
 *.jpg
 *.txt
+!requirements.txt
 .DS_Store
+.venv
+venv
+__pycache__
+*.py[cod]
+tests
 .env
 .env.local
 .env.production

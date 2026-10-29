@@ -1,14 +1,11 @@
-// Microservice Client for High-Performance Python/Enterprise API Endpoints
-// Connects UI actions to Python/Django/Flask Microservices endpoints
+// Client for the Python API compatibility endpoints.
 
-export interface AnalyticsSummary {
-  totalUnits: number;
-  occupiedUnits: number;
-  unoccupiedUnits: number;
-  rentedUnits: number;
-  occupancyRate: number;
-  activeComplaints: number;
-  urgentTickets: number;
+export interface AnalyticsResponse {
+  societyId: string;
+  computedAt: string;
+  engine: string;
+  latencyMs: number;
+  status: string;
 }
 
 export interface VisitorPassPayload {
@@ -29,7 +26,7 @@ export interface VisitorPassResult {
 
 export const PythonGatewayService = {
   // 1. Fetch Aggregated High-Performance Analytics (Powered by Analytics Engine)
-  async getSocietyAnalytics(societyId: string): Promise<AnalyticsSummary | null> {
+  async getSocietyAnalytics(societyId: string): Promise<AnalyticsResponse | null> {
     try {
       const res = await fetch(`/api/analytics/society/${encodeURIComponent(societyId)}`);
       if (!res.ok) return null;
@@ -80,7 +77,7 @@ export const PythonGatewayService = {
     }
   },
 
-  // 4. SLA & Work Order Background Check Trigger (Django Workflow Engine)
+  // 4. SLA & work-order compatibility endpoint (not a persisted workflow).
   async checkSlaEscalations(societyId: string): Promise<{ checkedCount: number; escalatedCount: number }> {
     try {
       const res = await fetch(`/api/workflows/sla/check/${encodeURIComponent(societyId)}`, {

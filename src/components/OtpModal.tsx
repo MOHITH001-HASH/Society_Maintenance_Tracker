@@ -50,6 +50,7 @@ export default function OtpModal({
 
   const sendOtp = async () => {
     setError("");
+    setDevCode(null);
     setLoading(true);
     try {
       const res = await sendOtpCode(contact, type);
@@ -77,7 +78,7 @@ export default function OtpModal({
     setError("");
     setLoading(true);
     try {
-      const res = await verifyOtpCode(contact, code);
+      const res = await verifyOtpCode(contact, code, type);
       if (res.success) {
         setSuccess(true);
         setTimeout(() => {
@@ -113,7 +114,7 @@ export default function OtpModal({
           <p className="text-xs text-slate-500 mt-1">
             {subtitle || (
               <>
-                A 6-digit security code was dispatched to{" "}
+                A 6-digit security code was requested for{" "}
                 <span className="font-bold text-slate-800">{contact}</span>
               </>
             )}
