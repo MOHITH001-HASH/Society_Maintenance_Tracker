@@ -1,218 +1,168 @@
 # Society Maintenance Tracker
 
-A web-based apartment and residential society maintenance management platform designed to streamline maintenance complaint workflows, status lifecycle tracking, administrative resolution processes, digital announcements, and notification dispatches.
+React and Vite frontend with a Python Flask API. Firebase Authentication and Firestore remain the frontend identity and application-data services; they are not replaced by a relational backend in this migration.
 
----
+## Runtime architecture
 
-## 1. Project Overview
+- **Frontend:** React, TypeScript, CSS/Tailwind, and Vite. Node.js is used only to install frontend dependencies and build the static bundle.
+- **Backend:** Python 3.12 and Flask. The same Flask app powers local development, Vercel Functions, and the optional Cloud Run container.
+- **Data:** The current UI reads and writes Firebase Auth/Firestore directly. The Python API currently provides health, visitor-pass, OTP, audit, upload, notification-stub, analytics-stub, and SLA-stub endpoints. The API does not replace the current Firestore CRUD implementation.
+- **Payments:** No complete payment provider integration or verified payment flow is present. Payment operations are intentionally not implemented or represented as production-ready.
 
-In residential communities, handling maintenance complaints through manual registers, phone calls, or unorganized messaging channels leads to delayed resolutions, lack of accountability, and zero visibility for residents.
-
-**Society Maintenance Tracker** addresses these challenges by providing:
-- **Resident Interface**: Enables residents to submit categorized maintenance complaints with descriptions and photo attachments, track status in real time, and view historical audit timelines.
-- **Administrative Dashboard**: Allows society managers to review incoming issues, assign priority levels, transition ticket statuses, and apply filters by category, status, and overdue criteria.
-- **Configurable Overdue Detection**: Automatically identifies unaddressed complaints exceeding an administrator-defined threshold and elevates them to the top of the queue.
-- **Digital Notice Board**: Publishes community announcements with an option to pin critical updates.
-- **Notification Flow**: Dispatches structured email notifications upon ticket status transitions and high-priority notice broadcasts.
-
----
-
-## 2. System Architecture & Features
-
-### 2.1 Resident Capabilities
-- **Authentication & Authorization**: Secure account access with role-based dashboard redirection.
-- **Complaint Submission**: Selectable categories (Plumbing, Electrical, Carpentry, Lift, Housekeeping, Security) with issue details and image uploads.
-- **Audit Timeline**: Step-by-step history tracking showing the actor, timestamp, status transition, and administrative remarks.
-- **Notice Board**: Chronological view of society announcements with pinned notices prioritized.
-
-### 2.2 Administrative Capabilities
-- **Overview Metrics**: Summary indicators showing Total Complaints, Open Issues, In Progress, Resolved, and Overdue counts.
-- **Search & Filtering**: Query complaints by category, lifecycle state, or submission date range.
-- **Priority Assignment**: Categorization of issues into Low, Normal, High, and Urgent priority tiers.
-- **Status Lifecycle Transitions**: Controlled updates from `Open` to `In Progress` and `Resolved`, accompanied by mandatory timestamping and optional resolution notes.
-- **SLA & Overdue Management**: Configurable threshold period (e.g., 2, 3, 5, or 7 days) to flag overdue tickets.
-- **Notice Publishing**: Authoring and publishing announcements to all residents.
-
----
-
-## 3. Directory Structure
-
-```
-Society_Maintenance_Tracker/
-├── backend/                       # Python Backend Services (Django + Flask + Celery)
-│   ├── django_core/               # Core Relational Architecture & Workflows
-│   │   ├── apps/
-│   │   │   ├── societies/         # Society and unit management
-│   │   │   ├── members/           # User authentication and profile roles
-│   │   │   └── tickets/           # Maintenance complaints & state machines
-│   │   ├── core/                  # Django project configuration & settings
-│   │   └── manage.py
-│   ├── flask_gateway/             # Lightweight Microservice Gateway
-│   │   ├── routes/
-│   │   │   ├── otp_service.py     # OTP dispatch and verification
-│   │   │   └── media_service.py   # Attachment and image upload processor
-│   │   └── app.py                 # API routing and verification endpoints
-│   └── celery_workers/            # Background Task Processing
-│       └── tasks.py               # SLA evaluation and notification jobs
-├── src/                           # Frontend Client (React + TypeScript + Tailwind CSS)
-│   ├── components/                # Modular UI elements (Modals, Navbars, Filters)
-│   ├── contexts/                  # Authentication and global state providers
-│   ├── pages/                     # Primary views (AdminDashboard, ResidentDashboard, Login)
-│   ├── lib/                       # Utility modules (Firebase client, API helpers)
-│   ├── types.ts                   # Centralized TypeScript interface definitions
-│   ├── App.tsx                    # Top-level routing and layout controller
-│   └── main.tsx                   # Frontend entry point
-├── server.ts                      # API Gateway & Reverse Proxy
-├── firestore.rules                # Database Security & Access Rules
-├── requirements.txt               # Python package dependencies
-├── package.json                   # Node.js dependencies and script definitions
-├── SYSTEM_DESIGN.md               # Detailed System Design Document
-├── ARCHITECTURE.md                # Microservices Architectural Reference
-└── README.md                      # Project Documentation and Setup Guide
-```
-
----
-
-## 4. Technology Stack
-
-| Layer | Technology | Function in Application |
-| :--- | :--- | :--- |
-| **Frontend** | React 18, TypeScript, Tailwind CSS | Single-page application, interactive dashboards, modal forms |
-| **Backend Core** | Python (Django 5, Flask, Celery) | Business logic, state validation, asynchronous task execution |
-| **API Ingress** | Express / Node.js Reverse Proxy | Request routing, static asset serving, middleware proxying |
-| **Database** | Firebase Firestore / PostgreSQL | Document persistence, real-time subscriptions, audit histories |
-| **Authentication** | Firebase Authentication | Role-based token management and session verification |
-| **Notifications** | Trigger Email Integration / SMTP Queue | Automated transactional email notifications |
-
----
-
-## 5. Local Setup and Installation
+## Local setup
 
 ### Prerequisites
-- **Node.js**: v18.0.0 or higher
-- **Python**: v3.10.0 or higher
-- **npm** or **bun**
 
-### Step 1: Clone Repository
-```bash
-git clone https://github.com/MOHITH001-HASH/Society_Maintenance_Tracker.git
-cd Society_Maintenance_Tracker
+- Python 3.12
+- Node.js 22.22 or newer and npm
+- Firebase project access if you want to use sign-in and Firestore-backed application data
+
+### 1. Configure Python
+
+From the repository root, create and activate a virtual environment:
+
+```powershell
+py -3 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+pip install -r requirements.txt
 ```
 
-### Step 2: Install Frontend Dependencies & Start Server
-```bash
-# Install dependencies
-npm install
+On macOS/Linux, use `python3 -m venv .venv` and `source .venv/bin/activate`.
 
-# Launch application development server (Port 3000)
+Configure the visitor-pass signing key for local use:
+
+```powershell
+$env:GATE_PASS_SECRET = "replace-with-a-long-random-local-key"
+$env:APP_ENV = "development"
+```
+
+Use a unique, high-entropy secret in every deployed environment. Never commit it.
+
+### 2. Configure and run the React frontend
+
+In another terminal:
+
+```powershell
+npm ci
 npm run dev
 ```
 
-### Step 3: Optional Python Backend Setup
-```bash
-# Initialize virtual environment
-python -m venv venv
-source venv/bin/activate    # On Windows: venv\Scripts\activate
+Vite runs at `http://localhost:5173` and proxies `/api` and `/uploads` to Flask at `http://127.0.0.1:8000`. Configure another backend address with `PYTHON_API_URL`.
 
-# Install requirements
-pip install -r requirements.txt
+### 3. Run the Python API
 
-# Run migrations and start server
-cd backend/django_core
-python manage.py migrate
-python manage.py runserver 8000
+In the activated Python terminal:
+
+```powershell
+python -m backend.flask_gateway.app
 ```
 
-### Step 4: Access Application
-Open a web browser and navigate to `http://localhost:3000`.
+The API listens on `http://127.0.0.1:8000`; check `http://127.0.0.1:8000/api/health`. To run the production-style frontend and API together locally, run `npm run build`, then start Flask and open `http://127.0.0.1:8000`.
 
----
+### 4. Run checks
 
-## 6. Environment Configuration
-
-Create a `.env` file in the project root with the following configuration:
-
-```env
-# Frontend / Firebase Client Credentials
-VITE_FIREBASE_API_KEY=AIzaSyBxjMAVZDvLqiejAAotRhtdkt4HZ92F60c
-VITE_FIREBASE_AUTH_DOMAIN=gen-lang-client-0615302941.firebaseapp.com
-VITE_FIREBASE_PROJECT_ID=gen-lang-client-0615302941
-VITE_FIREBASE_STORAGE_BUCKET=gen-lang-client-0615302941.firebasestorage.app
-VITE_FIREBASE_MESSAGING_SENDER_ID=859777274196
-VITE_FIREBASE_APP_ID=1:859777274196:web:7afbc612822800120af8c1
-
-# Backend Credentials
-DJANGO_SECRET_KEY=django-insecure-society-tracker-secret-key-2026
-GATE_PASS_SECRET=society-gate-pass-hmac-verification-key
-OTP_SECRET_KEY=society-otp-auth-token-secret-key
-
-# Application URLs
-APP_URL=http://localhost:3000
+```powershell
+python -m unittest discover -s tests -v
+npm run lint
+npm run build
 ```
 
----
+## Environment variables
 
-## 7. Data Models and Schema Definitions
+| Variable | Required | Purpose |
+|---|---:|---|
+| `GATE_PASS_SECRET` | For visitor-pass signing | HMAC signing secret; set as a Vercel environment variable or Cloud Run Secret Manager secret. |
+| `APP_ENV` | Recommended | Set to `production` for deployments. OTP issuing is development-only; production returns 503 until email/SMS delivery is configured. |
+| `PORT` | Platform-provided | Flask/Gunicorn listener port; defaults to `8000` locally and Cloud Run supplies `8080`. |
+| `PYTHON_API_URL` | No | Vite proxy target for local development; defaults to `http://127.0.0.1:8000`. |
+| `UPLOAD_DIR` | No | Local upload directory; defaults to `uploads/` or `/tmp/society-uploads` on Vercel. |
 
-### 7.1 `complaints` Collection
-| Field | Type | Description |
-| :--- | :--- | :--- |
-| `id` | String | Unique ticket identifier |
-| `societyId` | String | Multi-tenant society identifier |
-| `unitNumber` | String | Apartment or flat number (e.g., "A-302") |
-| `residentId` | String | Identifier of the submitting resident |
-| `residentName` | String | Name of the resident |
-| `residentEmail` | String | Contact email for notification delivery |
-| `category` | String | Issue category (Plumbing, Electrical, etc.) |
-| `title` | String | Brief summary of the complaint |
-| `description` | String | Comprehensive details of the issue |
-| `imageUrl` | String (Optional) | Photo attachment URL or Base64 data URI |
-| `priority` | String | Priority level (`low`, `normal`, `high`, `urgent`) |
-| `status` | String | Lifecycle state (`open`, `in_progress`, `resolved`) |
-| `isOverdue` | Boolean | Calculated flag indicating SLA breach |
-| `statusHistory` | Array of Objects | Chronological audit log of state changes |
-| `createdAt` | Timestamp | Record creation timestamp |
-| `updatedAt` | Timestamp | Last modification timestamp |
+Firebase client configuration is currently defined in `src/lib/firebase.ts`. Configure the Firebase project, Authentication providers, Firestore database, and Firestore rules there when switching environments. Do not put Firebase Admin credentials or other server secrets in Vite variables.
 
-### 7.2 `statusHistory` Object Schema
-| Field | Type | Description |
-| :--- | :--- | :--- |
-| `fromStatus` | String | Status prior to transition |
-| `toStatus` | String | Status after transition |
-| `changedBy` | String | Name of user making the modification |
-| `changedByRole`| String | Role of user (`admin` or `resident`) |
-| `note` | String (Optional) | Contextual notes regarding the update |
-| `timestamp` | Timestamp | ISO timestamp of modification event |
+## Deploy to Vercel (current target)
 
-### 7.3 `notices` Collection
-| Field | Type | Description |
-| :--- | :--- | :--- |
-| `id` | String | Unique notice identifier |
-| `societyId` | String | Society identifier |
-| `title` | String | Notice headline |
-| `content` | String | Full text of the announcement |
-| `isImportant` | Boolean | Boolean flag indicating pinned status |
-| `postedBy` | String | Name of publishing administrator |
-| `createdAt` | Timestamp | Notice publication timestamp |
+The repository's `vercel.json` builds the Vite frontend into `dist/`, serves the SPA, and rewrites `/api/*` and `/uploads/*` to the Flask function at `api/index.py`. That entrypoint imports the shared app from `backend/flask_gateway/app.py`; it does not duplicate API logic. `.python-version` and `requirements.txt` select and pin the Python runtime dependencies.
 
----
+1. Import the Git repository into Vercel and keep the repository root as the project root.
+2. Set the build command to `npm run build` and output directory to `dist` (already declared in `vercel.json`).
+3. Add `APP_ENV=production` and a long random `GATE_PASS_SECRET` in **Project Settings → Environment Variables** for Production and Preview as appropriate.
+4. Deploy from the Vercel dashboard or run `npx vercel` and `npx vercel --prod` after authenticating the Vercel CLI.
+5. Verify `/api/health`, a frontend route, and the visitor-pass endpoint after deployment.
 
-## 8. REST API Reference
+Vercel's function filesystem and process memory are ephemeral and instance-local. The current OTP state, rate limits, and uploaded files are not durable or shared across invocations. The browser currently uses client-side image data URLs for complaint attachments; do not rely on `/api/upload` as persistent media storage. Use a managed datastore and object-storage provider before depending on those API features in production.
 
-### Complaints API
-- `GET /api/societies/:societyId/tickets`: Retrieve all complaints for a given society.
-- `POST /api/societies/:societyId/tickets`: Submit a new maintenance complaint.
-- `PATCH /api/societies/:societyId/tickets/:ticketId`: Update complaint status and append an audit history record.
+## Prepare Cloud Run (later target; not deployed)
 
-### SLA & Overdue API
-- `POST /api/workflows/sla/check/:societyId`: Evaluate complaints against the configured overdue threshold.
+The `Dockerfile` builds the React bundle with Node in a build-only stage, then copies the static output into a Python runtime image running Gunicorn. No Node or Express backend runs in the final container. The included `cloudbuild.yaml` builds and deploys this image when explicitly invoked.
 
-### Notices API
-- `GET /api/societies/:societyId/notices`: Retrieve society announcements.
-- `POST /api/societies/:societyId/notices`: Publish a new announcement and trigger notification jobs.
+1. Select the Google Cloud project and enable the required APIs:
 
----
+   ```sh
+   gcloud config set project PROJECT_ID
+   gcloud services enable run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com secretmanager.googleapis.com
+   ```
 
-## 9. Live Application URL
+   Replace `PROJECT_ID` with the project ID where the service should run.
+2. Create the Artifact Registry repository once:
 
-- **Deployment URL**: https://society-maintenance-tracker-pied.vercel.app
+   ```sh
+   gcloud artifacts repositories create society-tracker --repository-format=docker --location=us-central1
+   ```
+
+3. Create the required signing secret (one-time):
+
+   ```sh
+   python -c "import secrets; print(secrets.token_urlsafe(48))" > gate-pass-secret.txt
+   gcloud secrets create gate-pass-secret
+   gcloud secrets versions add gate-pass-secret --data-file=./gate-pass-secret.txt
+   ```
+
+   Keep the file out of Git and remove it securely after adding the secret version.
+4. Grant the default Cloud Run identity access to the secret and the Cloud Build identity permission to deploy and push the image. For projects using the default service accounts:
+
+   ```sh
+   PROJECT_ID="$(gcloud config get-value project)"
+   PROJECT_NUMBER="$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')"
+   RUNTIME_SA="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
+   BUILD_SA="${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com"
+   gcloud secrets add-iam-policy-binding gate-pass-secret --member="serviceAccount:${RUNTIME_SA}" --role=roles/secretmanager.secretAccessor
+   gcloud artifacts repositories add-iam-policy-binding society-tracker --location=us-central1 --member="serviceAccount:${BUILD_SA}" --role=roles/artifactregistry.writer
+   gcloud projects add-iam-policy-binding "$PROJECT_ID" --member="serviceAccount:${BUILD_SA}" --role=roles/run.admin
+   gcloud iam service-accounts add-iam-policy-binding "$RUNTIME_SA" --member="serviceAccount:${BUILD_SA}" --role=roles/iam.serviceAccountUser
+   ```
+
+   If your project uses user-managed service accounts, grant the equivalent permissions to those identities instead.
+5. For a manual build/deploy, run:
+
+   ```sh
+   gcloud builds submit --config cloudbuild.yaml
+   ```
+
+   The build file uses the `us-central1` region and service name `society-management-app`. Change these in `cloudbuild.yaml` if needed. This command deploys; it has not been run as part of this migration.
+6. Verify the Cloud Run service URL at `/api/health` and check its runtime logs.
+
+Cloud Run's container filesystem is also ephemeral. Configure Firebase Storage or another durable object store before relying on uploaded files. OTP memory/rate limits are also instance-local until an external shared store is implemented.
+
+## API routes
+
+| Method | Route | Purpose |
+|---|---|---|
+| `GET` | `/api/health` | Health and service-capability status |
+| `POST` | `/api/upload` | Temporary file upload (`file`, maximum 15 MB; JPEG, PNG, WebP, GIF, PDF) |
+| `GET` | `/uploads/<filename>` | Serve an uploaded file from the current instance |
+| `POST` | `/api/otp/send` | Issue an in-memory development OTP; production returns 503 until delivery is configured |
+| `POST` | `/api/otp/verify` | Verify and consume an OTP |
+| `POST` | `/api/notify` | Compatibility stub; reports `delivery: "mock"` and sends no notification |
+| `GET` | `/api/analytics/society/<societyId>` | Compatibility analytics stub |
+| `POST` | `/api/visitors/pass` | Create a 24-hour HMAC-signed visitor pass; requires `GATE_PASS_SECRET` |
+| `POST` | `/api/security/audit` | Accept a security audit event (in-memory response only; not persisted) |
+| `POST` | `/api/workflows/sla/check/<societyId>` | Compatibility SLA stub; does not evaluate Firestore complaints |
+
+## Known limitations
+
+- **Payments:** Payment provider, credentials, webhook verification, reconciliation, and end-to-end payment tests are not implemented. Existing payment-related UI/contracts, if any, are not evidence of a working gateway. Configure and verify a provider before enabling real transactions.
+- **OTP:** The React OTP modal now calls the Python issue/verify endpoints. For local development the API returns `_devCode`; in production it returns 503 because no email/SMS delivery provider is configured. The in-memory state is not shared across instances, so a provider plus durable shared OTP/rate-limit storage is required before production identity verification.
+- **Notifications, analytics, SLA, audit:** These API endpoints retain compatibility response shapes but do not perform durable delivery, real aggregation, complaint escalation, or audit persistence. Email notices that the UI creates continue to rely on the configured Firebase email extension.
+- **Persistence and authentication:** The API's current auxiliary routes do not implement Firebase ID-token authorization. Vercel/Cloud Run memory and local upload disks are not durable storage. Do not expose sensitive records or rely on these stubs for production authorization/compliance.
+- **Legacy Python scaffolding:** Older Django/Celery modules remain under `backend/django_core` and `backend/celery_workers`; they are not installed or started by either deployment path. The active backend is Flask.

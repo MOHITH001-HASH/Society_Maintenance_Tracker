@@ -1,5 +1,4 @@
-# Google Cloud Build Pipeline Configuration
-# Builds Docker container and deploys directly to Google Cloud Run
+# Builds and deploys the Python runtime container to Google Cloud Run.
 
 steps:
   # Step 1: Build the container image using Dockerfile
@@ -7,21 +6,21 @@ steps:
     args:
       - 'build'
       - '-t'
-      - 'gcr.io/$PROJECT_ID/society-management-app:$COMMIT_SHA'
+      - 'us-central1-docker.pkg.dev/$PROJECT_ID/society-tracker/society-management-app:$COMMIT_SHA'
       - '-t'
-      - 'gcr.io/$PROJECT_ID/society-management-app:latest'
+      - 'us-central1-docker.pkg.dev/$PROJECT_ID/society-tracker/society-management-app:latest'
       - '.'
 
-  # Step 2: Push the container image to Google Container Registry / Artifact Registry
+  # Step 2: Push the container image to Artifact Registry
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'push'
-      - 'gcr.io/$PROJECT_ID/society-management-app:$COMMIT_SHA'
+      - 'us-central1-docker.pkg.dev/$PROJECT_ID/society-tracker/society-management-app:$COMMIT_SHA'
 
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'push'
-      - 'gcr.io/$PROJECT_ID/society-management-app:latest'
+      - 'us-central1-docker.pkg.dev/$PROJECT_ID/society-tracker/society-management-app:latest'
 
   # Step 3: Deploy container image to Google Cloud Run
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
@@ -31,7 +30,7 @@ steps:
       - 'deploy'
       - 'society-management-app'
       - '--image'
-      - 'gcr.io/$PROJECT_ID/society-management-app:$COMMIT_SHA'
+      - 'us-central1-docker.pkg.dev/$PROJECT_ID/society-tracker/society-management-app:$COMMIT_SHA'
       - '--region'
       - 'us-central1'
       - '--platform'
@@ -47,10 +46,14 @@ steps:
       - '0'
       - '--max-instances'
       - '5'
+      - '--set-env-vars'
+      - 'APP_ENV=production'
+      - '--set-secrets'
+      - 'GATE_PASS_SECRET=gate-pass-secret:latest'
 
 images:
-  - 'gcr.io/$PROJECT_ID/society-management-app:$COMMIT_SHA'
-  - 'gcr.io/$PROJECT_ID/society-management-app:latest'
+  - 'us-central1-docker.pkg.dev/$PROJECT_ID/society-tracker/society-management-app:$COMMIT_SHA'
+  - 'us-central1-docker.pkg.dev/$PROJECT_ID/society-tracker/society-management-app:latest'
 
 options:
   logging: CLOUD_LOGGING_ONLY

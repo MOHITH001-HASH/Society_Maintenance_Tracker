@@ -1,7 +1,29 @@
 {
+  "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
+  "functions": {
+    "api/index.py": {
+      "maxDuration": 30
+    }
+  },
   "rewrites": [
+    {
+      "source": "/api",
+      "destination": "/api/index.py?__path=/api"
+    },
+    {
+      "source": "/api/(.*)",
+      "destination": "/api/index.py?__path=/api/$1"
+    },
+    {
+      "source": "/uploads",
+      "destination": "/api/index.py?__path=/uploads/"
+    },
+    {
+      "source": "/uploads/(.*)",
+      "destination": "/api/index.py?__path=/uploads/$1"
+    },
     {
       "source": "/(.*)",
       "destination": "/index.html"

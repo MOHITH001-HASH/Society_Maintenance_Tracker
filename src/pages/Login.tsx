@@ -1069,7 +1069,7 @@ export default function Login() {
         type={otpContactType}
         onVerified={handleOtpVerified}
         title="Sign-In Security Verification"
-        subtitle={`Enter the 6-digit code sent to ${otpContact} to sign in to your society.`}
+        subtitle="Enter the 6-digit code returned by the local Python development API. Email/SMS delivery must be configured before production OTP sign-in can be enabled."
       />
 
       {/* Quick Society Onboarding Modal */}
