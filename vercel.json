@@ -3,26 +3,26 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "functions": {
-    "app.py": {
+    "api/index.py": {
       "maxDuration": 30
     }
   },
   "rewrites": [
     {
       "source": "/api",
-      "destination": "/app.py?__path=/api"
+      "destination": "/api/index.py?__path=/api"
     },
     {
       "source": "/api/(.*)",
-      "destination": "/app.py?__path=/api/$1"
+      "destination": "/api/index.py?__path=/api/$1"
     },
     {
       "source": "/uploads",
-      "destination": "/app.py?__path=/uploads/"
+      "destination": "/api/index.py?__path=/uploads/"
     },
     {
       "source": "/uploads/(.*)",
-      "destination": "/app.py?__path=/uploads/$1"
+      "destination": "/api/index.py?__path=/uploads/$1"
     },
     {
       "source": "/(.*)",

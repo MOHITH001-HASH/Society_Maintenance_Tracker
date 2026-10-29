@@ -8,7 +8,7 @@ Browser
   ├─ Firebase Authentication and Firestore (existing app data path)
   └─ Same-origin /api requests
         └─ Python Flask application (backend/flask_gateway/app.py)
-              ├─ Vercel: Python Function via app.py
+              ├─ Vercel: Python Function via api/index.py
               └─ Cloud Run: Gunicorn container from Dockerfile
 ```
 
@@ -16,7 +16,7 @@ Node.js is a frontend build-time tool only. The production container's runtime i
 
 ## Active Python application
 
-`backend/flask_gateway/app.py` is the canonical Flask application. The repository-root `app.py` exposes that app to Vercel. Local Vite development proxies `/api` and `/uploads` to the Flask development server. Cloud Run serves the built Vite `dist/` files and the API from the same Flask/Gunicorn service.
+`backend/flask_gateway/app.py` is the canonical Flask application. `api/index.py` exposes that shared app to Vercel as a Python Function. Local Vite development proxies `/api` and `/uploads` to the Flask development server. Cloud Run serves the built Vite `dist/` files and the API from the same Flask/Gunicorn service.
 
 The API currently provides health reporting, temporary media uploads, OTP issue/verification, signed visitor passes, audit acknowledgments, and compatibility notification/analytics/SLA responses. The latter compatibility routes are placeholders rather than persisted business workflows. See the README for route contracts and limitations.
 

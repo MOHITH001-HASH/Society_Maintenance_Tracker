@@ -130,7 +130,10 @@ def health_check():
     return jsonify(_health_payload())
 
 
-@app.route("/app.py", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
+@app.route(
+    "/api/index.py",
+    methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+)
 def vercel_api_dispatch():
     """Dispatch Vercel's rewritten API URL back to its original Flask route."""
     forwarded_path = request.args.get("__path", "")
@@ -398,7 +401,7 @@ def check_sla(society_id: str):
 def request_error(error):
     if (
         not request.path.startswith("/api")
-        and request.path not in {"/app.py", "/uploads"}
+        and request.path not in {"/api/index.py", "/uploads"}
         and not request.path.startswith("/uploads/")
     ):
         return error

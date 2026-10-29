@@ -82,7 +82,7 @@ Firebase client configuration is currently defined in `src/lib/firebase.ts`. Con
 
 ## Deploy to Vercel (current target)
 
-The repository's `vercel.json` builds the Vite frontend into `dist/`, serves the SPA, and rewrites `/api/*` and `/uploads/*` to the Flask app in `app.py`. `.python-version` and `requirements.txt` select and pin the Python runtime dependencies; Vercel runs the Flask app as a serverless function.
+The repository's `vercel.json` builds the Vite frontend into `dist/`, serves the SPA, and rewrites `/api/*` and `/uploads/*` to the Flask function at `api/index.py`. That entrypoint imports the shared app from `backend/flask_gateway/app.py`; it does not duplicate API logic. `.python-version` and `requirements.txt` select and pin the Python runtime dependencies.
 
 1. Import the Git repository into Vercel and keep the repository root as the project root.
 2. Set the build command to `npm run build` and output directory to `dist` (already declared in `vercel.json`).

@@ -6,6 +6,7 @@ from io import BytesIO
 from pathlib import Path
 from unittest.mock import patch
 
+from api.index import app as vercel_app
 from backend.flask_gateway import app as backend_module
 
 
@@ -187,11 +188,27 @@ class ApiTests(unittest.TestCase):
         filename = "media-test.png"
         Path(self.upload_dir.name, filename).write_bytes(b"uploaded")
         response = self.client.get(
-            f"/app.py?__path=%2Fuploads%2F{filename}"
+            f"/api/index.py?__path=%2Fuploads%2F{filename}"
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data, b"uploaded")
         response.close()
+
+    def test_vercel_function_config_targets_python_entrypoint(self):
+        project_root = Path(__file__).resolve().parents[1]
+        config = json.loads((project_root / "vercel.json").read_text(encoding="utf-8"))
+        entrypoint = project_root / "api" / "index.py"
+
+        self.assertTrue(entrypoint.is_file())
+        self.assertIs(vercel_app, backend_module.app)
+        self.assertIn("api/index.py", config["functions"])
+        self.assertNotIn("app.py", config["functions"])
+        self.assertTrue(
+            all(
+                rewrite["destination"].startswith("/api/index.py?")
+                for rewrite in config["rewrites"][:-1]
+            )
+        )
 
     def test_security_sla_and_notifications_keep_expected_contracts(self):
         audit = self.client.post(
@@ -205,7 +222,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(notification.json["delivery"], "mock")
 
     def test_vercel_rewrite_dispatches_to_original_api_path(self):
-        response = self.client.get("/app.py?__path=%2Fapi%2Fhealth")
+        response = self.client.get("/api/index.py?__path=%2Fapi%2Fhealth")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json["status"], "healthy")
 
