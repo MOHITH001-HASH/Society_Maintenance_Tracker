@@ -1,6 +1,0 @@
-{
-  "name": "Vasturith",
-  "description": "Vasturith - Enterprise multi-tenant society and residential property management platform with real-time maintenance ticketing, notice broadcasting, staff directory, and role-based access control.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}
